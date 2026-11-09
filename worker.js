@@ -1540,7 +1540,8 @@ const HTML = `<!DOCTYPE html>
       known.sort(function (a, b) { return a.cn - b.cn || (a.key < b.key ? -1 : 1); });
       // 入室して45秒たっていない端末は、まだ接続の最中なので、「入り直し」の対象にしない
       const mature = known.filter(function (r) { return r.ag >= 45; });
-      const weakest = (known.length >= 2 && mature.length && mature[0].cn < total - 1) ? mature[0] : null; // 全員とつながっている端末が最下位なら、入り直しは不要
+      const matureCount = rows.filter(function (r) { return r.ag >= 45; }).length; // 入室直後の端末は、まだつながっていなくて当然なので、数に入れない
+      const weakest = (known.length >= 2 && mature.length && mature[0].cn < Math.max(0, matureCount - 1)) ? mature[0] : null; // 全員とつながっている端末が最下位なら、入り直しは不要
       return { rows: known, unknown: rows.length - known.length, total: total, weakest: weakest };
     }
     function updatePeerCount() {
@@ -2734,7 +2735,10 @@ const HTML = `<!DOCTYPE html>
       try {
         const mod = await import('https://esm.sh/@noble/curves@1.4.0/secp256k1');
         pres.schnorr = mod.schnorr;
-        pres.priv = pres.schnorr.utils.randomPrivateKey();
+        // 読み込み直しても、同じ鍵を使う（鍵が変わると、読み込み前の自分が、別人として残り、在室が1人多く見える）。このタブの中だけで、保存する
+        let saved = ''; try { saved = sessionStorage.getItem('pochitalk_pres_key') || ''; } catch (_) {}
+        if (/^[0-9a-f]{64}$/.test(saved)) { const b = new Uint8Array(32); for (let i = 0; i < 32; i++) b[i] = parseInt(saved.substr(i * 2, 2), 16); pres.priv = b; }
+        else { pres.priv = pres.schnorr.utils.randomPrivateKey(); try { sessionStorage.setItem('pochitalk_pres_key', toHex(pres.priv)); } catch (_) {} }
         pres.pub = toHex(pres.schnorr.getPublicKey(pres.priv));
         return true;
       } catch (_) { return false; }
@@ -3960,7 +3964,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q7（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q8（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
