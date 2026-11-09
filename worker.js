@@ -684,6 +684,9 @@ const HTML = `<!DOCTYPE html>
         <p style="opacity:.8;font-size:0.75rem">使用ライブラリ: <a href="https://github.com/dmotz/trystero" target="_blank" rel="noopener noreferrer">Trystero</a>（MIT License）</p>
         <h3>このアプリについて</h3>
         <button class="btn-sub" id="aboutBtn" type="button" style="width:100%">使い方・プライバシーを見る</button>
+        <h3>うまくつながらないとき</h3>
+        <p style="opacity:.8;font-size:0.78rem;margin:6px 0">このサイトの保存データ（ハンドルネームや設定）を消して、読み込み直します。ブラウザの履歴は消えません。</p>
+        <button class="btn-sub" id="resetDataBtn" type="button" style="width:100%">保存データを消して、読み込み直す</button>
         <p style="opacity:.55;font-size:0.7rem;margin-top:10px">版: __VERSION__</p>
       </div>
     </div>
@@ -2003,6 +2006,18 @@ const HTML = `<!DOCTYPE html>
       });
       if (window.visualViewport) window.visualViewport.addEventListener('resize', function () { setTimeout(resetIfFits, 60); });
     })();
+
+    // トラブル用: このサイトの保存データだけを消して、読み込み直す（Safari の履歴は消さない）
+    document.getElementById('resetDataBtn').addEventListener('click', async function () {
+      if (!confirm('このサイトの保存データ（ハンドルネームや設定）を消して、読み込み直します。よろしいですか？')) return;
+      try { closeAllConnections(); } catch (_) {}
+      try { localStorage.clear(); } catch (_) {}
+      try { sessionStorage.clear(); } catch (_) {}
+      try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map(function (k) { return caches.delete(k); })); } } catch (_) {}
+      try { if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(function (r) { return r.unregister(); })); } } catch (_) {}
+      await wait(400);
+      location.replace(location.pathname);
+    });
 
     // ---------- モールス受信（700Hzトーンを検出して文字に戻す） ----------
     const MORSE_REVERSE = {};
@@ -3970,7 +3985,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q10（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q11（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
