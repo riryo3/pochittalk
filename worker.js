@@ -1284,6 +1284,70 @@ const HTML = `<!DOCTYPE html>
         try { room.addStream(ms, { target: id }); } catch (_) { sentStreams.delete(id); }
       });
     }
+
+    // ---------- 「音が届いていない相手に、送り直しを頼む」仕組み（ぽっと通話 qramo さん、MIT License の方式を移植）----------
+    // 受信トラックは、パケットが届くまで muted のまま。トラックも再生部品もあるのに、中身が流れてこない（iPhone の Safari で、入った直後に起きる）。
+    // まず黙って「送り直して」と頼み（相手が入り直したのと同じ効果）、それでも駄目なら、全員が止まったままの状態が続いたときだけ、読み込み直す。
+    const AUDIO_WAIT_MS = 2000, AUDIO_MUTE_MS = 2500, AUDIO_MUTE_MID_MS = 5000, AUDIO_FRESH_MS = 15000;
+    const NUDGE_EVERY_MS = 6000, NUDGE_MAX = 3, NUDGE_ACCEPT_MS = 4000, RECOVER_AFTER_MS = 25000;
+    let sendNudge = null, sendWebcaps = null;
+    const webPeers = new Set();      // この仕組みを持つ相手（ウェブ版）。アプリ版は、無音のとき何も送らないので、見張りの対象にしない
+    const nudges = new Map(), nudgeSeen = new Map(), peerSince = new Map();
+    let stuckPeers = new Set(), brokenSince = 0;
+    window.nudgeSent = 0; window.nudgeServed = 0;
+    function resendStreamTo(id) { // 一度外して、新しい MediaStream に包んで入れ直す
+      if (!room || !sendStream) return;
+      try {
+        const old = sentStreams.get(id);
+        if (old) room.removeStream(old, { target: id });
+        const ms = new MediaStream(sendStream.getTracks());
+        sentStreams.set(id, ms);
+        room.addStream(ms, { target: id });
+      } catch (_) {}
+    }
+    function audioFlowing(id) { // 「音が届いている」: 再生部品があり、受信トラックが生きていて、中身が流れている（muted でない）
+      const el = document.getElementById('audio-' + id);
+      if (!el || !el.srcObject) return false;
+      const now = Date.now();
+      const live = el.srcObject.getAudioTracks().some(function (t) { return t.readyState === 'live' && !t.muted; });
+      if (live) { el.mutedSince = 0; return true; }
+      if (!el.mutedSince) el.mutedSince = now;
+      const fresh = now - (peerSince.get(id) || 0) < AUDIO_FRESH_MS;
+      return now - el.mutedSince < (fresh ? AUDIO_MUTE_MS : AUDIO_MUTE_MID_MS);
+    }
+    function checkAudioArrival() {
+      if (!room || !currentKey) { stuckPeers = new Set(); brokenSince = 0; return; }
+      const now = Date.now(), stuck = [];
+      let expect = 0;
+      peerMap.forEach(function (info, id) {
+        if (!webPeers.has(id)) return;
+        expect++;
+        if (audioFlowing(id)) { nudges.delete(id); return; }
+        if (now - (peerSince.get(id) || now) < AUDIO_WAIT_MS) return; // 相手の準備中かもしれない
+        const st = nudges.get(id) || { n: 0, at: 0 };
+        if (st.n >= NUDGE_MAX) { stuck.push(id); return; }            // 頼み尽くした
+        if (now - st.at < NUDGE_EVERY_MS) return;
+        try { if (sendNudge) { sendNudge(1, id); window.nudgeSent++; if (window.pcLog) window.pcLog.push(pcClock() + ' 送り直しを頼んだ ' + ((info && info.name) || id.slice(0, 5)) + '（' + (st.n + 1) + '回目）'); } } catch (_) {}
+        nudges.set(id, { n: st.n + 1, at: now });
+      });
+      stuckPeers = new Set(stuck);
+      if (!(expect > 0 && stuck.length === expect)) { brokenSince = 0; return; } // 全員が止まったままのときだけ、自動で読み込み直す
+      if (!brokenSince) { brokenSince = now; return; }
+      if (now - brokenSince < RECOVER_AFTER_MS || reconnecting || document.hidden) return;
+      brokenSince = now;
+      if (window.pcLog) window.pcLog.push(pcClock() + ' 全員の音が止まったままなので、つなぎ直します');
+      reconnectRoom(true, true);
+    }
+    setInterval(checkAudioArrival, 1000);
+    window.__pochiNudge = function (id) { try { if (sendNudge) sendNudge(1, id); } catch (_) {} }; // 診断・試験用
+    // iPhone は、他のアプリに切り替えると、AudioContext を中断し、再生部品も止める。戻ったとき・通話中は、定期的に起こし直す
+    function replayAudios() { document.querySelectorAll('audio[id^="audio-"]').forEach(function (a) { if (a.paused) a.play().catch(function () { showUnlockHint(); }); }); }
+    function wakeAudio() {
+      if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().then(replayAudios).catch(function () {});
+      else replayAudios();
+    }
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) wakeAudio(); });
+    setInterval(function () { if (room && !document.hidden) wakeAudio(); }, 5000);
     function unsendStreams() {
       if (room) sentStreams.forEach(function (ms, id) { try { room.removeStream(ms, { target: id }); } catch (_) {} });
       sentStreams.clear();
@@ -1308,6 +1372,7 @@ const HTML = `<!DOCTYPE html>
         closeOldConnections(room);
         peerMap.clear();
         sentStreams.clear();
+        webPeers.clear(); nudges.clear(); nudgeSeen.clear(); peerSince.clear();
         rxAnalysers.clear();
         rxDecoders.clear();
         currentTalkerId = null;
@@ -1341,6 +1406,22 @@ const HTML = `<!DOCTYPE html>
       const faxAction = actionOf(room, 'faxPage');
       sendFaxPage = faxAction[0];
       faxAction[1](function (data, peerId) { onFaxPage(data, peerId); });
+
+      // 音が届いていない相手から「送り直して」と頼まれたとき（連打には応じない）。ウェブ版どうしの目印も交換する
+      const nudgeA = actionOf(room, 'nudge');
+      sendNudge = nudgeA[0];
+      nudgeA[1](function (data, peerId) {
+        if (!peerId || !peerMap.has(peerId)) return;
+        const now = Date.now();
+        if (now - (nudgeSeen.get(peerId) || 0) < NUDGE_ACCEPT_MS) return;
+        nudgeSeen.set(peerId, now);
+        resendStreamTo(peerId);
+        window.nudgeServed++;
+        if (window.pcLog) window.pcLog.push(pcClock() + ' 送り直しの頼みに応じた ' + peerId.slice(0, 5));
+      });
+      const capA = actionOf(room, 'webcaps');
+      sendWebcaps = capA[0];
+      capA[1](function (data, peerId) { if (peerId) webPeers.add(peerId); });
 
       const joinAction = actionOf(room, 'joinAge');
       sendJoinAge = joinAction[0];
@@ -1396,6 +1477,8 @@ const HTML = `<!DOCTYPE html>
       setHandler(room, 'onPeerJoin', function (peerId) {
         if (window.pcLog) { window.pcLog.push(pcClock() + ' 相手が現れた ' + peerId.slice(0, 5)); }
         peerMap.set(peerId, { name: '接続中...', isTalking: false, joinJudged: false });
+        peerSince.set(peerId, Date.now());
+        try { if (sendWebcaps) sendWebcaps(1, peerId); } catch (_) {}
         renderPeers();
         setTimeout(checkRoomFull, 3000);
         sendNickname(myNickname, peerId);
@@ -1416,6 +1499,7 @@ const HTML = `<!DOCTYPE html>
         if (window.pcLog) { const lm = peerMap.get(peerId); window.pcLog.push(pcClock() + ' 相手が去った ' + ((lm && lm.name) || peerId.slice(0, 5))); }
         peerMap.delete(peerId);
         sentStreams.delete(peerId);
+        webPeers.delete(peerId); nudges.delete(peerId); nudgeSeen.delete(peerId); peerSince.delete(peerId);
         rxAnalysers.delete(peerId);
         rxSources.delete(peerId);
         rxDecoders.delete(peerId);
@@ -2491,8 +2575,8 @@ const HTML = `<!DOCTYPE html>
       if (voxCheck.checked) { setVoxUI(false); stopVox(); }
       if (room) { const old = room; room = null; closeOldConnections(old); }
       releaseMic();
-      sendPttState = null; sendNickname = null; sendJoinAge = null; sendTag = null; sendFaxPage = null;
-      peerMap.clear();
+      sendPttState = null; sendNickname = null; sendJoinAge = null; sendTag = null; sendFaxPage = null; sendNudge = null; sendWebcaps = null;
+      peerMap.clear(); webPeers.clear(); nudges.clear(); nudgeSeen.clear(); peerSince.clear();
       currentTalkerId = null;
       document.querySelectorAll('audio[id^="audio-"]').forEach(function (a) { a.remove(); });
       ledRx.classList.remove('active');
@@ -3469,6 +3553,10 @@ const HTML = `<!DOCTYPE html>
         if (st1) st1.names.forEach(function (n) { const nn = String(n).replace('(自分)', ''); if (String(n).indexOf('(自分)') < 0 && !have.has(nn.slice(0, 12))) miss.push(nn); });
         if (miss.length) diagLine(out, '一覧にいるが、つながっていない人: ' + miss.join('、'), '#fbbf24');
       }
+      if (currentKey) {
+        const ws = []; peerMap.forEach(function (info, id) { if (webPeers.has(id)) ws.push(String((info && info.name) || id.slice(0, 5)).slice(0, 12) + (audioFlowing(id) ? '：流れている' : '：止まっている（頼んだ ' + ((nudges.get(id) || { n: 0 }).n) + '回' + (stuckPeers.has(id) ? '・頼み尽くした' : '') + '）')); });
+        diagLine(out, '音の見張り（ウェブ版の相手 ' + ws.length + ' 人）: ' + (ws.length ? ws.join(' / ') : 'なし') + ' / 頼んだ ' + window.nudgeSent + ' 回・頼まれた ' + window.nudgeServed + ' 回', stuckPeers.size ? '#fbbf24' : '');
+      }
       if (window.pcCount) {
         diagLine(out, '接続の記録: 作成 ' + window.pcCount.created + ' / 破棄 ' + window.pcCount.closed + ' / 失敗 ' + window.pcCount.failed + '（直近の出来事は、下）');
         (function () {
@@ -3845,7 +3933,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q5（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q6（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
