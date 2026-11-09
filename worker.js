@@ -152,6 +152,8 @@ const HTML = `<!DOCTYPE html>
       box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
     }
     .peer-tag.me { background: #172554; color: #bfdbfe; }
+    /* 一覧には在室しているのに、つながっていない人: 赤いチップ */
+    .peer-tag.miss { background: #450a0a; color: #fecaca; border: 1px solid #ef4444; }
     .peer-tag.me.sending { background: #7f1d1d; color: #fecaca; box-shadow: 0 0 8px rgba(239, 68, 68, 0.35); }
     .ptt-container { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 6px 0; }
     .ptt-btn {
@@ -1555,9 +1557,33 @@ const HTML = `<!DOCTYPE html>
       const goodAudio = goodLinkCount() + 1;
       if (goodAudio < connected) peerCountEl.textContent += '（音声OK ' + goodAudio + '）';
       peerCountEl.style.color = connected >= present ? '#4ade80' : '#fbbf24';
+      renderMissing();
       const lr = linkRanking();
       if (lr && lr.weakest && lr.weakest.me) { peerCountEl.textContent += ' ⟳あなたが入り直す番'; peerCountEl.style.color = '#f87171'; }
     }
+    // 一覧（在室通知）には出ているのに、まだつながっていない人を、赤いチップで出す（名前の数で突き合わせる）
+    function renderMissing() {
+      if (!peersList) return;
+      peersList.querySelectorAll('.peer-tag.miss').forEach(function (e) { e.remove(); });
+      if (!currentKey) return;
+      const st = roomStats().get(currentKey);
+      if (!st) return;
+      const have = new Map();
+      const add = function (n) { const k = String(n || '').slice(0, 12); have.set(k, (have.get(k) || 0) + 1); };
+      add(myNickname); peerMap.forEach(function (info) { add(info.name); });
+      const note = peersList.querySelector('.peers-empty');
+      st.names.forEach(function (n) {
+        if (String(n).indexOf('(自分)') >= 0) return;
+        const k = String(n).slice(0, 12);
+        if ((have.get(k) || 0) > 0) { have.set(k, have.get(k) - 1); return; }
+        const sp = document.createElement('span');
+        sp.className = 'peer-tag miss';
+        sp.title = '一覧にはいますが、まだつながっていません';
+        sp.textContent = k;
+        if (note) peersList.insertBefore(sp, note); else peersList.appendChild(sp);
+      });
+    }
+    window.__pochiFakeLobby = function (name) { lobbyEntries.set('fake' + Math.random(), { ch: currentKey, cn: 0, ag: 9999, talking: false, name: name, tag: '', by: '', at: 0, ts: Date.now() }); renderMissing(); }; // 試験用
     function renderPeers() {
       updatePeerCount();
       announce(); // つながっている人数が変わったら、順位のため、すぐ知らせる（1秒に1回まで）
@@ -1588,6 +1614,7 @@ const HTML = `<!DOCTYPE html>
         none.textContent = currentKey ? '（ほかの参加者を待っています）' : '待機中（参加者なし）';
         peersList.appendChild(none);
       }
+      renderMissing();
     }
 
     function onStartReceiving(name) {
@@ -3933,7 +3960,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q6（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q7（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
