@@ -842,7 +842,8 @@ const HTML = `<!DOCTYPE html>
     })();
   </script>
   <script type="module">
-    import { joinRoom, selfId } from '/vendor/trystero-0.25.4-p8t.mjs';
+    import { joinRoom, selfId, getRelaySockets } from '/vendor/trystero-0.25.4-p8t.mjs';
+    window.__trysteroSockets = getRelaySockets;
 
     const pttBtn = document.getElementById('pttBtn');
     const ledTx = document.getElementById('ledTx');
@@ -3553,6 +3554,11 @@ const HTML = `<!DOCTYPE html>
       diagLine(out, '音声の処理（AudioContext）: ' + (audioCtx ? audioCtx.state : '未作成') + (audioCtx && audioCtx.state !== 'running' ? '　← 止まっています。画面を1回タップ（クリック）してください' : ''), audioCtx && audioCtx.state !== 'running' ? '#f87171' : '');
       diagLine(out, '自分: ' + (isTransmitting ? '送信中' : '待機') + ' / VOX ' + (voxCheck.checked ? 'オン' : 'オフ') + ' / スピーカー ' + (speakerMuted ? 'ミュート' : 'オン'));
       diagLine(out, '通話用のリレー: ' + ROOM_RELAYS.length + ' 本を使用 / 経路: ' + (FORCE_RELAY ? '中継のみ' : '直接を優先'));
+      try { // 相手を見つけるための実際の接続（Trystero が開いている WebSocket）
+        const socks = getRelaySockets(); let open = 0, total = 0; const bad = [];
+        Object.keys(socks || {}).forEach(function (u) { total++; const w = socks[u]; if (w && w.readyState === 1) open++; else bad.push(String(u).split('://').pop().slice(0, 22) + (w ? '(' + ['接続中', '', '切断中', '切断'][w.readyState] + ')' : '')); });
+        diagLine(out, '相手を探す接続: ' + open + ' / ' + total + ' 本が開いています' + (bad.length ? '（閉じている: ' + bad.join('、') + '）' : ''), open === 0 ? '#f87171' : (open < total ? '#fbbf24' : ''));
+      } catch (_) {}
       let pcs = {};
       try { pcs = room ? room.getPeers() : {}; } catch (_) {}
       const ids = Object.keys(pcs);
@@ -3990,7 +3996,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q13（Trystero 0.25.4・接続準備 8・やり直し短縮）';
+const APP_VERSION = '2026-11-10-z12q14（Trystero 0.25.4・接続準備 8・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
