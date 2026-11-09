@@ -3535,7 +3535,7 @@ const HTML = `<!DOCTYPE html>
       for (const id of ids) {
         const pc = pcs[id];
         const meta = peerMap.get(id);
-        let route = '?', rtt = '', inb = '', outB = -1, outP = 0, inP = -1;
+        let route = '?', rtt = '', inb = '', outB = -1, outP = 0, inP = -1, ips = '';
         try {
           const stats = await pc.getStats();
           let pairId = null;
@@ -3557,6 +3557,7 @@ const HTML = `<!DOCTYPE html>
             if (r.type === 'candidate-pair' && (r.id === pairId || (!pairId && r.nominated && r.state === 'succeeded'))) {
               const lc = stats.get(r.localCandidateId), rc = stats.get(r.remoteCandidateId);
               route = (lc ? lc.candidateType : '?') + ' - ' + (rc ? rc.candidateType : '?');
+              if (lc && rc && lc.candidateType === 'relay') ips = ' [' + (lc.address || lc.ip || '?') + ' ↔ ' + (rc.address || rc.ip || '?') + ']'; // 中継どうしの住所（つながらない組み合わせとの比較用）
               if (typeof r.currentRoundTripTime === 'number') rtt = ' / 遅延 ' + Math.round(r.currentRoundTripTime * 1000) + 'ms';
             }
           });
@@ -3574,7 +3575,7 @@ const HTML = `<!DOCTYPE html>
             + ' / 送信トラック ' + (snd.length ? snd.map(function (r) { return r.track.readyState + (r.track.enabled ? '' : '・停止中'); }).join(',') : 'なし')
             + ' / 向き ' + (tr.join(',') || '?') + ' / 送信 ' + (outB >= 0 ? Math.round(outB / 1024) + 'KB' : '?') + ' / 受信パケット ' + (inP >= 0 ? inP : '?'), '#94a3b8');
         } catch (_) {}
-        diagLine(out, (meta && meta.name ? meta.name : id.slice(0, 5)) + ' : ' + pc.connectionState + ' / ice:' + pc.iceConnectionState + ' / 経路 ' + route + rtt + inb + ' / 話し中の合図: ' + (meta && meta.isTalking ? 'はい' : 'いいえ') + (id === currentTalkerId ? '（受信中）' : ''), bad ? '#f87171' : (pc.connectionState === 'connected' ? '#4ade80' : '#fbbf24'));
+        diagLine(out, (meta && meta.name ? meta.name : id.slice(0, 5)) + ' : ' + pc.connectionState + ' / ice:' + pc.iceConnectionState + ' / 経路 ' + route + ips + rtt + inb + ' / 話し中の合図: ' + (meta && meta.isTalking ? 'はい' : 'いいえ') + (id === currentTalkerId ? '（受信中）' : ''), bad ? '#f87171' : (pc.connectionState === 'connected' ? '#4ade80' : '#fbbf24'));
       }
       if (currentKey) {
         const have = new Set();
@@ -3964,7 +3965,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q8（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q9（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
