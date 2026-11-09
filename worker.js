@@ -844,6 +844,27 @@ const HTML = `<!DOCTYPE html>
   <script type="module">
     import { joinRoom, selfId, getRelaySockets } from '/vendor/trystero-0.25.4-p8t.mjs';
     window.__trysteroSockets = getRelaySockets;
+    // 相手を探す通信（Nostr のリレー）が、こちらの書き込みを、断っていないかを数える（リレーは、短い間に、たくさん書くと、断ることがある）
+    const relayMsgs = new Map(); const hookedSockets = new WeakSet();
+    function hookRelaySockets() {
+      try {
+        const socks = getRelaySockets();
+        Object.keys(socks || {}).forEach(function (u) {
+          const w = socks[u]; if (!w || hookedSockets.has(w)) return;
+          hookedSockets.add(w);
+          const host = String(u).split('://').pop().split('/')[0];
+          const st = relayMsgs.get(host) || { ok: 0, no: 0, notice: 0, last: '' }; relayMsgs.set(host, st);
+          w.addEventListener('message', function (ev) {
+            let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
+            if (!Array.isArray(m)) return;
+            if (m[0] === 'OK') { if (m[2]) st.ok++; else { st.no++; st.last = String(m[3] || '').slice(0, 60); } }
+            else if (m[0] === 'NOTICE' || m[0] === 'CLOSED') { st.notice++; st.last = String(m[m.length - 1] || '').slice(0, 60); }
+          });
+        });
+      } catch (_) {}
+    }
+    setInterval(hookRelaySockets, 2000);
+
 
     const pttBtn = document.getElementById('pttBtn');
     const ledTx = document.getElementById('ledTx');
@@ -3557,6 +3578,9 @@ const HTML = `<!DOCTYPE html>
       try { // 相手を見つけるための実際の接続（Trystero が開いている WebSocket）
         const socks = getRelaySockets(); let open = 0, total = 0; const bad = [];
         Object.keys(socks || {}).forEach(function (u) { total++; const w = socks[u]; if (w && w.readyState === 1) open++; else bad.push(String(u).split('://').pop().slice(0, 22) + (w ? '(' + ['接続中', '', '切断中', '切断'][w.readyState] + ')' : '')); });
+        let okAll = 0, noAll = 0; const refused = [];
+        relayMsgs.forEach(function (st, host) { okAll += st.ok; noAll += st.no + st.notice; if (st.no + st.notice > 0) refused.push(host.slice(0, 20) + ' ' + (st.no + st.notice) + '回「' + st.last + '」'); });
+        diagLine(out, '相手を探す接続への書き込み: 受け付けられた ' + okAll + ' 回 / 断られた・注意された ' + noAll + ' 回' + (refused.length ? '（' + refused.join('、') + '）' : ''), noAll > 0 ? '#fbbf24' : '');
         diagLine(out, '相手を探す接続: ' + open + ' / ' + total + ' 本が開いています' + (bad.length ? '（閉じている: ' + bad.join('、') + '）' : ''), open === 0 ? '#f87171' : (open < total ? '#fbbf24' : ''));
       } catch (_) {}
       let pcs = {};
@@ -3996,7 +4020,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q14（Trystero 0.25.4・接続準備 8・やり直し短縮）';
+const APP_VERSION = '2026-11-10-z12q15（Trystero 0.25.4・接続準備 8・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
