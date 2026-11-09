@@ -809,7 +809,19 @@ const HTML = `<!DOCTYPE html>
         // 相手が同じストリームを入れ直したときの新しいトラックを知らせてくれないことがある（ぽっと通話 v0.14.20 と同じ回避）
         pc.addEventListener('track', function (e) { try { if (window.pochiTrack) window.pochiTrack(pc, e); } catch (_) {} });
         let seenIce = '', seenConn = '';
-        pc.addEventListener('iceconnectionstatechange', function () { if (pc.iceConnectionState !== seenIce) { seenIce = pc.iceConnectionState; add('#' + n + ' ice:' + seenIce + '（' + Math.round((Date.now() - t0) / 100) / 10 + '秒）'); if (seenIce === 'failed') add('#' + n + ' 失敗の詳細: 候補 host=' + candCount.host + ' srflx=' + candCount.srflx + ' relay=' + candCount.relay + ' / 相手の記述 ' + (pc.remoteDescription ? 'あり' : 'なし') + ' / signaling ' + pc.signalingState); } });
+        pc.addEventListener('iceconnectionstatechange', function () { if (pc.iceConnectionState !== seenIce) { seenIce = pc.iceConnectionState; add('#' + n + ' ice:' + seenIce + '（' + Math.round((Date.now() - t0) / 100) / 10 + '秒）'); if (seenIce === 'failed') add('#' + n + ' 失敗の詳細: 候補 host=' + candCount.host + ' srflx=' + candCount.srflx + ' relay=' + candCount.relay + ' / 相手の記述 ' + (pc.remoteDescription ? 'あり' : 'なし') + ' / signaling ' + pc.signalingState);
+          // 失敗した接続の、候補の組み合わせ（ペア）を調べる: 相手の候補が届いていたか、何組を試して、何組に返事があったか
+          try {
+            pc.getStats().then(function (stats) {
+              const rc = { host: 0, srflx: 0, relay: 0, prflx: 0 }; let pairs = 0, tried = 0, answered = 0, sent = 0;
+              stats.forEach(function (r) {
+                if (r.type === 'remote-candidate' && rc[r.candidateType] !== undefined) rc[r.candidateType]++;
+                if (r.type === 'candidate-pair') { pairs++; if ((r.requestsSent || 0) > 0) tried++; if ((r.responsesReceived || 0) > 0) answered++; sent += r.requestsSent || 0; }
+              });
+              add('#' + n + ' 失敗のペア: 相手の候補 relay=' + rc.relay + ' srflx=' + rc.srflx + ' host=' + rc.host + ' / ペア ' + pairs + '（試した ' + tried + '・返事あり ' + answered + '・送信 ' + sent + '）');
+            }).catch(function () {});
+          } catch (_) {}
+        } });
         pc.addEventListener('connectionstatechange', function () {
           if (pc.connectionState !== seenConn) { seenConn = pc.connectionState; add('#' + n + ' conn:' + seenConn + '（' + Math.round((Date.now() - t0) / 100) / 10 + '秒）'); }
           if (pc.connectionState === 'failed') window.pcCount.failed++;
@@ -3462,7 +3474,7 @@ const HTML = `<!DOCTYPE html>
         (function () {
           const bad = new Set();
           window.pcLog.forEach(function (l) { const m = /(#[0-9]+) (ice|conn):failed/.exec(l); if (m) bad.add(m[1]); });
-          return window.pcLog.filter(function (l) { const m = /(#[0-9]+) /.exec(l); return l.indexOf('相手') >= 0 || l.indexOf('取り決め') >= 0 || l.indexOf('ICEエラー') >= 0 || (m && bad.has(m[1]) && (l.indexOf('失敗の詳細') >= 0 || l.indexOf('ice:failed') >= 0 || l.indexOf('作成') >= 0)) ; }).slice(-30);
+          return window.pcLog.filter(function (l) { const m = /(#[0-9]+) /.exec(l); return l.indexOf('相手') >= 0 || l.indexOf('取り決め') >= 0 || l.indexOf('ICEエラー') >= 0 || (m && bad.has(m[1]) && (l.indexOf('失敗の詳細') >= 0 || l.indexOf('失敗のペア') >= 0 || l.indexOf('ice:failed') >= 0 || l.indexOf('作成') >= 0)) ; }).slice(-30);
         })().forEach(function (l) { diagLine(out, '　' + l, '#94a3b8'); });
       }
       diagBox.textContent = '';
@@ -3833,7 +3845,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q3（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q4（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
