@@ -1358,6 +1358,10 @@ const HTML = `<!DOCTYPE html>
     // 部屋を出るときは、相手との接続（RTCPeerConnection）を実際に閉じる。Trystero 0.25 は同じアプリの相手との接続を部屋をまたいで
     // 持ち続け、leave() では閉じない。しかも退出時の removeTrack で作られる再交渉の offer は送り先が無く、接続が固まったまま残る。
     // 同じ相手と同じ部屋で入り直すと、その固まった接続が使い回されて、音声だけ通らなくなる
+    // 読み込み直す前に、先に作ってあった接続（相手が決まっていないもの）も含めて、全部閉じる。閉じないと、TURN 側に、使われない確保が残り、
+    // 何度も読み込み直すうちに、確保が溜まって、新しい接続が通らなくなっているのでは、という仮説（2026-11-10）
+    function closeAllConnections() { try { Array.from(window.pcLive || []).forEach(function (pc) { try { pc.close(); } catch (_) {} }); } catch (_) {} }
+    window.addEventListener('pagehide', closeAllConnections);
     function closeOldConnections(oldRoom) {
       const stale = window.pcLive ? Array.from(window.pcLive).filter(function (pc) { try { return !!pc.remoteDescription; } catch (_) { return false; } }) : [];
       const done = function () { stale.forEach(function (pc) { try { pc.close(); } catch (_) {} }); };
@@ -3296,6 +3300,7 @@ const HTML = `<!DOCTYPE html>
       try { pres.announced = false; presenceSend({ ch: '' }); } catch (_) {} // 一覧からも、いったん消す（残ると、読み込み直したあとの人数が 1 人多く見える）
       // 退出の知らせを先に送ってから読み込み直す（相手がこちらの離脱を早く知るほど、戻ったときにすんなり繋ぎ直してもらえる）。届かなくても 1.2 秒で進める
       try { await Promise.race([closeOldConnections(oldRoom), wait(1200)]); } catch (_) {}
+      closeAllConnections(); await wait(400); // 先に作ってあった接続も閉じて、TURN の確保を返す（返事が出るのを、少し待つ）
       location.reload();
     }
     // 読み込み直しの後半: 予約があれば、同じ部屋に入り直す（init から呼ぶ）
@@ -3965,7 +3970,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q9（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q10（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
