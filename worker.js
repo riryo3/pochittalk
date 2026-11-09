@@ -799,8 +799,8 @@ const HTML = `<!DOCTYPE html>
       window.pcLog = [];
       window.pcCount = { created: 0, closed: 0, failed: 0 };
       window.pcLive = new Set(); // まだ閉じていない接続（退出時に、使った接続を実際に閉じるために使う）
-      window.pcClock = function () { const d = new Date(); return ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); };
-      function t() { const d = new Date(); return ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); }
+      window.pcClock = function () { const d = new Date(); return d.getHours() + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); };
+      function t() { return window.pcClock(); }
       function add(s) { window.pcLog.push(t() + ' ' + s); if (window.pcLog.length > 80) window.pcLog.shift(); }
       function P(cfg, c) {
         const pc = new Orig(cfg, c);
@@ -817,13 +817,15 @@ const HTML = `<!DOCTYPE html>
         pc.addEventListener('iceconnectionstatechange', function () { if (pc.iceConnectionState !== seenIce) { seenIce = pc.iceConnectionState; add('#' + n + ' ice:' + seenIce + '（' + Math.round((Date.now() - t0) / 100) / 10 + '秒）'); if (seenIce === 'failed') add('#' + n + ' 失敗の詳細: 候補 host=' + candCount.host + ' srflx=' + candCount.srflx + ' relay=' + candCount.relay + ' / 相手の記述 ' + (pc.remoteDescription ? 'あり' : 'なし') + ' / signaling ' + pc.signalingState + ' / 自分の中継 ' + (relayAddrs.join(', ') || 'なし'));
           // 失敗した接続の、候補の組み合わせ（ペア）を調べる: 相手の候補が届いていたか、何組を試して、何組に返事があったか
           try {
+            if (seenIce !== 'failed' && seenIce !== 'connected' && seenIce !== 'completed') throw 0;
+            const pairLabel = seenIce === 'failed' ? '失敗のペア' : '接続できたペア';
             pc.getStats().then(function (stats) {
               const rc = { host: 0, srflx: 0, relay: 0, prflx: 0 }; let pairs = 0, tried = 0, answered = 0, sent = 0; const rAddrs = [];
               stats.forEach(function (r) {
                 if (r.type === 'remote-candidate' && rc[r.candidateType] !== undefined) { rc[r.candidateType]++; if (r.candidateType === 'relay' && rAddrs.length < 4) rAddrs.push((r.protocol || '?') + ' ' + (r.address || r.ip || '?')); }
                 if (r.type === 'candidate-pair') { pairs++; if ((r.requestsSent || 0) > 0) tried++; if ((r.responsesReceived || 0) > 0) answered++; sent += r.requestsSent || 0; }
               });
-              add('#' + n + ' 失敗のペア: 相手の候補 relay=' + rc.relay + ' srflx=' + rc.srflx + ' host=' + rc.host + ' / ペア ' + pairs + '（試した ' + tried + '・返事あり ' + answered + '・送信 ' + sent + '）' + (rAddrs.length ? ' / 相手の中継 ' + rAddrs.join(', ') : ''));
+              add('#' + n + ' ' + pairLabel + ': 相手の候補 relay=' + rc.relay + ' srflx=' + rc.srflx + ' host=' + rc.host + ' / ペア ' + pairs + '（試した ' + tried + '・返事あり ' + answered + '・送信 ' + sent + '）' + (rAddrs.length ? ' / 相手の中継 ' + rAddrs.join(', ') : ''));
             }).catch(function () {});
           } catch (_) {}
         } });
@@ -4045,7 +4047,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q17（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
+const APP_VERSION = '2026-11-10-z12q18（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
