@@ -254,6 +254,7 @@ object PochiEngine {
         startPresence()
         _state.update { it.copy(ready = true) }
         renderScan()
+        takeWantJoin()
         Runtime.scope.launch {
             while (isActive) {
                 meterTick()
@@ -464,9 +465,17 @@ object PochiEngine {
         Runtime.scope.launch { joinInternal(key) }
     }
 
+    /** 起動直後や再接続の最中に押された入室。準備ができたら、そのまま入る (捨てない)。 */
+    private var wantJoin: String? = null
+
     private fun joinInternal(key: String) {
-        val n = net ?: return flash("接続の準備中です。少し待ってください")
         if (!isRoomKey(key)) return
+        val n = net
+        if (n == null || reconnecting) {
+            // 準備中の net は、まだ無い / 閉じかけで、ここで入っても通話の接続ができない。準備ができるまで覚えておく
+            wantJoin = key
+            return flash("接続の準備中です。終わりしだい入室します")
+        }
         if (isTransmitting) return flash("送信中は部屋を変えられません")
         if (key == currentKey) return flash("すでにこの部屋です")
         // 満員の部屋には入れない (一覧の人数が上限のとき)
@@ -792,7 +801,14 @@ object PochiEngine {
         } finally {
             reconnecting = false
             _state.update { it.copy(reconnecting = false) }
+            takeWantJoin()
         }
+    }
+
+    private fun takeWantJoin() {
+        val k = wantJoin ?: return
+        wantJoin = null
+        joinInternal(k)
     }
 
     /** 回線が戻った/切り替わったときに、自動でつなぎ直す (Web版の online イベントに相当)。 */
