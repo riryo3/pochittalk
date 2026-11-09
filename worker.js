@@ -1613,6 +1613,30 @@ const HTML = `<!DOCTYPE html>
         if (note) peersList.insertBefore(sp, note); else peersList.appendChild(sp);
       });
     }
+
+    // 入室して45秒たっても、だれともつながらないとき、保存データを消して入り直すよう案内する（Safariで、サイトの状態が悪くなることがあるため）
+    let zeroSince = 0;
+    function updateZeroHint() {
+      let box = document.getElementById('zeroHint');
+      const st = currentKey ? roomStats().get(currentKey) : null;
+      const others = st ? st.names.filter(function (n) { return String(n).indexOf('(自分)') < 0; }).length : 0;
+      const bad = currentKey && peerMap.size === 0 && others > 0;
+      if (!bad) { zeroSince = 0; if (box) box.remove(); return; }
+      if (!zeroSince) zeroSince = Date.now();
+      if (Date.now() - zeroSince < 45000) { if (box) box.remove(); return; }
+      if (box) return;
+      box = document.createElement('div');
+      box.id = 'zeroHint';
+      box.style.cssText = 'margin:8px 0;padding:10px;border:1px solid #fbbf24;border-radius:10px;color:#fbbf24;font-size:13px;line-height:1.5';
+      box.appendChild(document.createTextNode('入室して1分近く、だれともつながっていません。このブラウザの保存データが悪くなっているかもしれません。下のボタンで消して入り直すと、直ることがあります。'));
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn-sub'; b.style.cssText = 'width:100%;margin-top:8px';
+      b.textContent = '保存データを消して、入り直す';
+      b.addEventListener('click', function () { document.getElementById('resetDataBtn').click(); });
+      box.appendChild(b);
+      peersList.parentNode.insertBefore(box, peersList.nextSibling);
+    }
+    setInterval(updateZeroHint, 3000);
     window.__pochiFakeLobby = function (name) { lobbyEntries.set('fake' + Math.random(), { ch: currentKey, cn: 0, ag: 9999, talking: false, name: name, tag: '', by: '', at: 0, ts: Date.now() }); renderMissing(); }; // 試験用
     function renderPeers() {
       updatePeerCount();
@@ -2036,6 +2060,7 @@ const HTML = `<!DOCTYPE html>
       try { localStorage.clear(); } catch (_) {}
       try { sessionStorage.clear(); } catch (_) {}
       try { if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map(function (k) { return caches.delete(k); })); } } catch (_) {}
+      try { if (indexedDB && indexedDB.databases) { const dbs = await indexedDB.databases(); dbs.forEach(function (d) { if (d && d.name) indexedDB.deleteDatabase(d.name); }); } } catch (_) {}
       try { if (navigator.serviceWorker) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(function (r) { return r.unregister(); })); } } catch (_) {}
       await wait(400);
       location.replace(location.pathname);
@@ -4020,7 +4045,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q15（Trystero 0.25.4・接続準備 8・やり直し短縮）';
+const APP_VERSION = '2026-11-10-z12q16（Trystero 0.25.4・接続準備 8・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
