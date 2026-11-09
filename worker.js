@@ -1341,7 +1341,7 @@ const HTML = `<!DOCTYPE html>
       if (now - brokenSince < RECOVER_AFTER_MS || reconnecting || document.hidden) return;
       brokenSince = now;
       if (window.pcLog) window.pcLog.push(pcClock() + ' 全員の音が止まったままなので、つなぎ直します');
-      reconnectRoom(true, true);
+      reconnectRoom(true, true, '全員の音が25秒止まったまま');
     }
     setInterval(checkAudioArrival, 1000);
     window.__pochiNudge = function (id) { try { if (sendNudge) sendNudge(1, id); } catch (_) {} }; // 診断・試験用
@@ -2730,7 +2730,7 @@ const HTML = `<!DOCTYPE html>
       if (dur > 25000 && Date.now() - lastAutoReconnect > 90000 && !reconnecting) {
         lastAutoReconnect = Date.now();
         mismatchSince = Date.now();
-        reconnectRoom(true);
+        reconnectRoom(true, false, '一覧と接続の食い違いが25秒続いた');
       }
     }
     setInterval(function () { checkMismatch(); updatePeerCount(); }, 3000);
@@ -3299,10 +3299,11 @@ const HTML = `<!DOCTYPE html>
       try { sessionStorage.setItem(AUTO_RELOAD_KEY, JSON.stringify(arr)); } catch (_) {}
       return true;
     }
-    async function reconnectRoom(auto, force) { // force: 自己修復から（自動の設定がオフでも動く）
+    async function reconnectRoom(auto, force, why) { // force: 自己修復から（自動の設定がオフでも動く） why: 理由（診断に残す）
       if (auto && !autoReconnectOn && !force) return;
       if (!currentKey || reconnecting) return;
       if (auto && !autoReloadAllowed()) { flashSub('つながりません。「再接続」を押すか、時間をおいて入り直してください'); return; }
+      try { sessionStorage.setItem('pochitalk_reload_why', JSON.stringify({ at: Date.now(), auto: !!auto, why: why || (auto ? '自動（理由不明）' : '「再接続」ボタン') })); } catch (_) {}
       reconnecting = true;
       const btn = document.getElementById('reconnectBtn');
       btn.disabled = true;
@@ -3330,7 +3331,7 @@ const HTML = `<!DOCTYPE html>
     }
     document.getElementById('reconnectBtn').addEventListener('click', function () { reconnectRoom(false); });
     // 回線が戻ったときは、自動でつなぎ直す
-    window.addEventListener('online', function () { reconnectRoom(true); });
+    window.addEventListener('online', function () { reconnectRoom(true, false, '回線が戻った'); });
     // ---------- QRコード（裏返して、裏面に招待QRを見せる）----------
     const radioEl = document.getElementById('radioView'), frontFace = document.getElementById('frontFace'), backFace = document.getElementById('backFace');
     let flipping = false;
@@ -3420,7 +3421,7 @@ const HTML = `<!DOCTYPE html>
       if (!need) return;
       const voxWasOn = voxCheck.checked;
       if (micDead) { if (voxWasOn) { setVoxUI(false); stopVox(); } releaseMic(); } // 止まったマイクは捨てて、取り直す
-      reconnectRoom(true).then(function () {
+      reconnectRoom(true, false, 'マイクが止まっていた（画面に戻った）').then(function () {
         if (userMediaStream) return;
         initMicrophone(true).then(function (ok) {
           if (ok && voxWasOn) { setVoxUI(true); startVox(); }
@@ -3513,7 +3514,7 @@ const HTML = `<!DOCTYPE html>
           // 4回やり直しても直らない: この端末だけ、1回、退出して入り直す（全員が同時に動かないよう、5分に1回まで）
           lastEscalate = now; healState.delete(id);
           if (window.pcLog) window.pcLog.push(pcClock() + ' 取り決めが直らないため、入り直します');
-          reconnectRoom(true, true);
+          reconnectRoom(true, true, '音の取り決めが直らなかった');
           return;
         }
         if (now - st.since < 2000 || st.tries >= 6 || now - st.last < 4000) return;
@@ -3542,6 +3543,10 @@ const HTML = `<!DOCTYPE html>
         if (lr.weakest && lr.weakest.me) diagLine(out, '→ あなたが一番つながっていません。入り直してください（ほかの人は、入り直さないでください）', '#f87171');
         else if (lr.weakest) diagLine(out, '→ 入り直すのは「' + lr.weakest.name + '」です。あなたは、そのままで大丈夫です', '#4ade80');
       })();
+      try {
+        const why = JSON.parse(sessionStorage.getItem('pochitalk_reload_why') || 'null');
+        if (why && Date.now() - why.at < 900000) { const d = new Date(why.at); diagLine(out, '直前の読み込み直し: ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ' / ' + (why.auto ? '自動' : '手動') + ' / 理由: ' + why.why, why.auto ? '#fbbf24' : ''); }
+      } catch (_) {}
       let rs = 0;
       pres.socks.forEach(function (w) { if (w.readyState === 1) rs++; });
       diagLine(out, '一覧用のリレー: ' + rs + ' / ' + aliveRelays.length + ' 本がつながっています');
@@ -3614,7 +3619,7 @@ const HTML = `<!DOCTYPE html>
         (function () {
           const bad = new Set();
           window.pcLog.forEach(function (l) { const m = /(#[0-9]+) (ice|conn):failed/.exec(l); if (m) bad.add(m[1]); });
-          return window.pcLog.filter(function (l) { const m = /(#[0-9]+) /.exec(l); return l.indexOf('相手') >= 0 || l.indexOf('取り決め') >= 0 || l.indexOf('ICEエラー') >= 0 || (m && bad.has(m[1]) && (l.indexOf('失敗の詳細') >= 0 || l.indexOf('失敗のペア') >= 0 || l.indexOf('ice:failed') >= 0 || l.indexOf('作成') >= 0)) ; }).slice(-30);
+          return window.pcLog.filter(function (l) { const m = /(#[0-9]+) /.exec(l); return l.indexOf('相手') >= 0 || l.indexOf('取り決め') >= 0 || l.indexOf('送り直し') >= 0 || l.indexOf('つなぎ直し') >= 0 || l.indexOf('入り直し') >= 0 || l.indexOf('ICEエラー') >= 0 || (m && bad.has(m[1]) && (l.indexOf('失敗の詳細') >= 0 || l.indexOf('失敗のペア') >= 0 || l.indexOf('ice:failed') >= 0 || l.indexOf('作成') >= 0)) ; }).slice(-30);
         })().forEach(function (l) { diagLine(out, '　' + l, '#94a3b8'); });
       }
       diagBox.textContent = '';
@@ -3985,7 +3990,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q11（Trystero 0.25.4・接続準備 8）';
+const APP_VERSION = '2026-11-10-z12q12（Trystero 0.25.4・接続準備 8）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
