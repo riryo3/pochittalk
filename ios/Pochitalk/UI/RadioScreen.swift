@@ -6,49 +6,257 @@ struct RadioScreen: View {
     let ui: UiState
     @ObservedObject var engine: PochiEngine
     @State private var showQr = false
+    @State private var drawerOpen = false
+    @State private var focusKey: String?
+    @State private var showSettings = false
+    @State private var showAbout = false
+    @State private var showWelcome = false
+    @State private var confirm: ConfirmRequest?
+    /// 初回案内は、アプリを起動したときに1回だけ出す
+    private static var welcomeShown = false
+    @State private var nickDraft = ""
+    @FocusState private var nickFocused: Bool
+
+    /// この幅より広い画面 (iPad など) では、Web 版の広い画面と同じ 2 列にする: 左 = 本体、右 = ダイヤルと操作ボタン。
+    private static let wideWidth: CGFloat = 800
 
     var body: some View {
-        guard let key = ui.currentKey else { return AnyView(EmptyView()) }
-        return AnyView(
-            ScrollView {
-                VStack(spacing: 16) {
-                    deviceCard(key)
-                    PochiCard { RoomListCard(ui: ui, showReconnect: false) }
-                    Spacer().frame(height: 24)
+        GeometryReader { geo in
+            let wide = geo.size.width >= Self.wideWidth
+            ZStack(alignment: .leading) {
+                if wide { wideLayout(height: geo.size.height) } else { narrowLayout }
+                if ui.currentKey != nil {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        MorseKeyboard(ui: ui)
+                            .background(GeometryReader { g in Color.clear.preference(key: CardHeightKey.self, value: g.size.height) })
+                    }
+                    .onPreferenceChange(CardHeightKey.self) { kbHeight = $0 }
                 }
-                .padding(16)
+                if !wide {
+                    DialDrawer(layer: .panel, ui: ui, open: $drawerOpen, focusKey: $focusKey, onJoin: { requestJoin($0) }) // 開いたドロワーは、最前面
+                }
             }
-            .onChange(of: key) { _ in showQr = false }
-        )
+            .onChange(of: wide) { w in if w { drawerOpen = false } }
+        }
+        .onChange(of: ui.currentKey) { _ in showQr = false; drawerOpen = false }
+        .onAppear {
+            if nickDraft.isEmpty { nickDraft = ui.nickname }
+            if !Self.welcomeShown { Self.welcomeShown = true; showWelcome = WelcomeView.needed() } // 保存値を直接読む (起動直後は、画面の状態がまだ既定値のため)
+        }
+        .onChange(of: ui.nickname) { n in if nickDraft.isEmpty { nickDraft = n } }
+        .alert(confirm?.title ?? "", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), presenting: confirm) { c in
+            Button(c.okLabel) { c.action() }
+            Button("キャンセル", role: .cancel) {}
+        } message: { c in Text(c.message) }
+        .sheet(isPresented: $showAbout) { AboutView() }
+        .sheet(isPresented: $showSettings) { SettingsView(ui: ui, engine: engine) }
+        .sheet(isPresented: $showWelcome) { WelcomeView(ui: ui, engine: engine, onSettings: { showWelcome = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showSettings = true } }) }
     }
 
-    private func deviceCard(_ key: String) -> some View {
-        VStack(spacing: 20) {
-            if showQr {
-                QrBackFace(roomKey: key) { withAnimation { showQr = false } }
-            } else {
+    private var versionText: some View {
+        Text("版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+            .font(.system(size: 11)).foregroundStyle(PC.muted.opacity(0.7))
+    }
+
+    /// スマホ: 1 枚のカード + 左端のタブから開くダイヤルのドロワー。
+    private var narrowLayout: some View {
+        ZStack(alignment: .leading) {
+            ScrollView {
                 VStack(spacing: 12) {
-                    HStack {
-                        Brand()
-                        Spacer()
-                        HStack(spacing: 6) {
-                            Button(ui.reconnecting ? "再接続中…" : "再接続") { engine.reconnect() }
-                                .buttonStyle(SubButtonStyle(small: true)).disabled(ui.reconnecting)
-                            Button("退出") { engine.leave() }.buttonStyle(SubButtonStyle(small: true))
-                        }
-                    }
-                    Rectangle().fill(PC.border).frame(height: 2)
+                    deviceCard(wide: false)
+                    versionText
                 }
-                DisplayPanel(ui: ui, key: key, meter: engine.meter)
-                PttSection(ui: ui)
-                footer(key)
+                .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 2) // 左端は、ドロワーのタブが、カードに重なる
+            }
+            .scrollDismissesKeyboardCompat()
+            .scrollBounceIfNeeded() // 収まる画面 (12 Pro など) では、スクロールもバウンドもしない。小さい端末だけスクロール
+            .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: ui.currentKey != nil ? kbHeight : 0) }
+            // 画面のどこからでも、左から右へのスワイプで、ダイヤルのドロワーが開く (話している間は開かない)
+            .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { v in
+                if v.translation.width > 70 && v.translation.width > abs(v.translation.height) * 1.5 && !ui.ledTx {
+                    withAnimation(.easeOut(duration: 0.25)) { drawerOpen = true }
+                }
+            })
+            DialDrawer(layer: .tab, ui: ui, open: $drawerOpen, focusKey: $focusKey) // タブは、キーボードより下
+        }
+    }
+
+    /// iPad など広い画面 (Web 版の広い画面と同じ): 2 列のカードを、画面の中央に置く。
+    /// 左 = 本体のカード / 右 = ダイヤルのカード、その下に、操作ボタン (入室中) またはハンドルネームと設定 (入室前) のカード。
+    private func wideLayout(height: CGFloat) -> some View {
+        ScrollView {
+            HStack(alignment: .top, spacing: 24) {
+                VStack(spacing: 12) {
+                    deviceCard(wide: true)
+                    versionText
+                }
+                .frame(maxWidth: 400)
+                VStack(spacing: 16) {
+                    PochiCard { DialPanel(ui: ui, focusKey: $focusKey, onJoin: { requestJoin($0) }, showDetail: false) }
+                    PochiCard { if let key = ui.currentKey { controlButtons(key) } else { nameAndSettings } }
+                }
+                .frame(maxWidth: 400)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: height - (ui.currentKey != nil ? kbHeight : 0) - 32, alignment: .center) // 縦も、中央に
+            .padding(.vertical, 16)
+        }
+        .scrollBounceIfNeeded()
+        .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: ui.currentKey != nil ? kbHeight : 0) }
+    }
+
+    @State private var frontHeight: CGFloat = 0
+
+    /// QR の裏返し: 約 0.2 秒で 90° 回って入れ替わり、0.22 秒で戻る (合わせて約 0.42 秒)。「動きを減らす」のときは、アニメーションなし。
+    private func toggleQr() {
+        if UIAccessibility.isReduceMotionEnabled { showQr.toggle() }
+        else { withAnimation(.easeInOut(duration: 0.42)) { showQr.toggle() } }
+    }
+    @State private var kbHeight: CGFloat = 0
+
+    private func deviceCard(wide: Bool) -> some View {
+        let key = ui.currentKey
+        return FlipCard(angle: showQr && key != nil ? 180 : 0, front: cardFront(key, wide: wide), back: cardBack(key, wide: wide))
+    }
+
+    private func cardChrome<C: View>(@ViewBuilder _ c: () -> C) -> some View {
+        c()
+            .padding(22)
+            .frame(maxWidth: .infinity)
+            .background(PC.card, in: RoundedRectangle(cornerRadius: 28))
+            .overlay(RoundedRectangle(cornerRadius: 28).stroke(PC.border, lineWidth: 2))
+            .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
+    }
+
+    private func header(_ key: String?, wide: Bool) -> some View {
+        VStack(spacing: 10) {
+            HStack {
+                Brand()
+                Spacer()
+                if !wide { reconnectLeaveButtons(key) } // 広い画面では、右の列の操作ボタンのカードに移す
+            }
+            Rectangle().fill(PC.border).frame(height: 2)
+        }
+    }
+
+    /// 再接続・退出。`fill` のとき (広い画面の操作ボタンのカード) は、2 つで幅を等分する (Web 版の #ctrlCard の flex: 1)。
+    private func reconnectLeaveButtons(_ key: String?, fill: Bool = false) -> some View {
+        HStack(spacing: fill ? 8 : 6) {
+            Button { engine.reconnect() } label: { Text(ui.reconnecting ? "再接続中…" : "再接続").frame(maxWidth: fill ? .infinity : nil) }
+                .buttonStyle(SubButtonStyle(small: !fill)).disabled(ui.reconnecting)
+            Button { confirm = ConfirmRequest(title: "この部屋から退出しますか？", message: "", okLabel: "退出") { engine.leave() } } label: { Text("退出").frame(maxWidth: fill ? .infinity : nil) }
+                .buttonStyle(SubButtonStyle(small: !fill)).disabled(key == nil)
+        }
+    }
+
+    /// 広い画面の操作ボタンのカード: 1 段目 = 再接続・退出 / 2 段目 = 招待URL・QR・ミュート (Web 版の #ctrlCard)。
+    private func controlButtons(_ key: String) -> some View {
+        VStack(spacing: 10) {
+            reconnectLeaveButtons(key, fill: true)
+            footer(key)
+        }
+    }
+
+    private func cardFront(_ key: String?, wide: Bool) -> some View {
+        cardChrome {
+            VStack(spacing: 12) {
+                header(key, wide: wide)
+                DisplayPanel(ui: ui, key: key, shown: shownRoom, meter: engine.meter)
+                PttSection(ui: ui, idle: idleButton)
+                if key == nil { idleExtras(wide: wide) }
+                if let key, !wide { footer(key) }
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity)
-        .background(PC.card, in: RoundedRectangle(cornerRadius: 28))
-        .overlay(RoundedRectangle(cornerRadius: 28).stroke(PC.border, lineWidth: 2))
-        .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
+        .background(GeometryReader { g in Color.clear.preference(key: CardHeightKey.self, value: g.size.height) })
+        .onPreferenceChange(CardHeightKey.self) { frontHeight = $0 }
+    }
+
+    /// 裏: 招待の QR。表と同じ大きさのカードで、同じボタンの列を持つ (QR ボタンで表に戻る)。
+    private func cardBack(_ key: String?, wide: Bool) -> some View {
+        cardChrome {
+            VStack(spacing: 16) {
+                if let key { QrBackFace(roomKey: key) }
+                Spacer(minLength: 0)
+                if let key, !wide { footer(key) }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true) // 縦に広がらない (広い画面で、表が中央にずれないように)
+        .frame(minHeight: frontHeight > 0 ? frontHeight : nil) // 表と同じ高さ (表の高さが、最低の高さ)
+    }
+
+    /// 入室前に、液晶に出す部屋 (招待された部屋、なければダイヤルの赤い線の部屋)。
+    private var shownRoom: RoomInfo? {
+        guard ui.currentKey == nil, let k = ui.pendingKey ?? focusKey else { return nil }
+        return ui.rooms.first { $0.key == k }
+    }
+
+    /// 入室前の大きなボタン: 招待リンクで開いた → JOIN / どこにも入っていない → NEW。
+    private var idleButton: IdleButton? {
+        guard ui.currentKey == nil else { return nil }
+        if let k = ui.pendingKey { return IdleButton(title: "JOIN", sub: "入室") { engine.join(k) } }
+        return IdleButton(title: "NEW", sub: "新しい部屋") { requestNew() }
+    }
+
+    /// 入室前 (本体のカードの中): 招待のリンク。スマホでは、ハンドルネームと設定も、ここに置く。
+    private func idleExtras(wide: Bool) -> some View {
+        VStack(spacing: 12) {
+            if ui.pendingKey != nil {
+                HStack(spacing: 14) {
+                    linkButton("あとで") { engine.setPendingKey(nil) }
+                    linkButton("新しい部屋を作る") { requestNew(clearPending: true) }
+                    linkButton("使い方・プライバシー") { showAbout = true }
+                }
+            }
+            if !wide { nameAndSettings } // 広い画面では、右の列のカードに移す
+        }
+    }
+
+    /// ハンドルネームと設定ボタン (広い画面では、右の列のカード)。
+    private var nameAndSettings: some View {
+        VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ハンドルネーム（みんなに見える、あなたの名前）").font(.system(size: 12)).foregroundStyle(PC.muted)
+                TextField("ハンドルネーム", text: $nickDraft)
+                    .focused($nickFocused).pochiField().submitLabel(.done)
+                    .onChange(of: nickDraft) { v in
+                        let t = String(v.prefix(12))
+                        if t != v { nickDraft = t }
+                        engine.setNickname(t)
+                    }
+                    .onChange(of: nickFocused) { f in if !f { engine.commitNickname() } }
+                    .onSubmit { nickFocused = false }
+            }
+            Button { showSettings = true } label: { Text("⚙ 設定（マイク・このアプリについて）").frame(maxWidth: .infinity) }
+                .buttonStyle(SubButtonStyle(container: Color(hex: 0x4B5563)))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: 0x9CA3AF), lineWidth: 1))
+            if ui.micPermission == .denied {
+                Text("マイクが許可されていません。設定アプリ → ぽちっと通話 → マイク で許可してください。")
+                    .font(.system(size: 12)).foregroundStyle(PC.amber)
+            }
+        }
+    }
+
+    /// 入室の確認 (Web 版 tuneKey)。満員は、確認の前に弾く。いまの部屋にいるときは、退出も伝える。
+    private func requestJoin(_ key: String) {
+        if key == ui.currentKey { drawerOpen = false; return }
+        let room = ui.rooms.first { $0.key == key }
+        if let room, room.count >= PochiEngine.maxRoom { engine.join(key); return } // 「この部屋は満員です」を出す
+        var msg = formatKey(key) + ((room?.count ?? 0) > 0 ? "（いま \(room!.count) 人）" : "")
+        if ui.currentKey != nil { msg += "\nいまの部屋からは退出します。" }
+        confirm = ConfirmRequest(title: "この部屋に入室しますか？", message: msg, okLabel: "入室") { drawerOpen = false; engine.join(key) }
+    }
+
+    private func requestNew(clearPending: Bool = false) {
+        confirm = ConfirmRequest(title: "新しい部屋を作って、入室しますか？", message: ui.currentKey != nil ? "いまの部屋からは退出します。" : "", okLabel: "作って入室") {
+            if clearPending { engine.setPendingKey(nil) }
+            engine.createRoom()
+        }
+    }
+
+    private func linkButton(_ t: String, _ a: @escaping () -> Void) -> some View {
+        Button(t, action: a).font(.system(size: 13)).foregroundStyle(Color(hex: 0x93C5FD)).underline()
     }
 
     private func footer(_ key: String) -> some View {
@@ -60,7 +268,7 @@ struct RadioScreen: View {
                     }
                     .buttonStyle(SubButtonStyle())
                 }
-                Button { withAnimation { showQr = true } } label: { QrIcon().frame(width: 40) }
+                Button { toggleQr() } label: { QrIcon().frame(width: 40) }
                     .buttonStyle(SubButtonStyle())
                     .accessibilityLabel("QRコードで招待")
                 Button { engine.toggleSpeakerMute() } label: { Text(ui.speakerMuted ? "🔇" : "🔈").font(.system(size: 18)).frame(width: 40) }
@@ -90,39 +298,68 @@ struct QrIcon: View {
 /// 液晶: ROOM HASH / レベルメーター / 話題タグ / TX・RX・状態 / 参加者 (Web 版の .display)。
 private struct DisplayPanel: View {
     let ui: UiState
-    let key: String
+    let key: String?
+    /// 入室前に出す部屋 (招待された部屋 / ダイヤルの赤い線の部屋)
+    let shown: RoomInfo?
     let meter: MeterState
 
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 2) {
-                Text("ROOM HASH").font(.system(size: 12, design: .monospaced)).tracking(3).foregroundStyle(PC.muted)
-                Text(formatKey(key)).font(.system(size: 38, weight: .black, design: .monospaced)).foregroundStyle(PC.sky)
+                Text(key != nil ? "ROOM HASH" : ui.pendingKey != nil ? "招待された部屋" : "ダイヤルの部屋").font(.system(size: 12, design: .monospaced)).tracking(3).foregroundStyle(PC.muted)
+                Text(key.map(formatKey) ?? shown.map { formatKey($0.key) } ?? "----·----").font(.system(size: 38, weight: .black, design: .monospaced)).foregroundStyle(PC.sky)
                     .minimumScaleFactor(0.6).lineLimit(1)
-                Text(ui.flash ?? (ui.rxText.isEmpty ? " " : ui.rxText)).font(.system(size: 12, design: ui.flash == nil && !ui.rxText.isEmpty ? .monospaced : .default))
+                if let c = ui.faxCompose {
+                    Text(c.isEmpty ? "FAXモード: 文字を打って ⏎ で送信（ESCで終了）" : c + "▌")
+                        .font(.system(size: 12, design: c.isEmpty ? .default : .monospaced)).foregroundStyle(c.isEmpty ? PC.muted : PC.sky)
+                        .multilineTextAlignment(.center).lineLimit(1).frame(height: 18)
+                } else {
+                    Text(ui.flash ?? (ui.rxText.isEmpty ? " " : ui.rxText)).font(.system(size: 12, design: ui.flash == nil && !ui.rxText.isEmpty ? .monospaced : .default))
                     .foregroundStyle(ui.flash == nil && !ui.rxText.isEmpty ? PC.sky : PC.muted).multilineTextAlignment(.center)
-                    .frame(minHeight: 18)
+                    .lineLimit(1).frame(height: 18)
+                }
                 if let paper = ui.faxPaper { FaxPaperView(paper: paper) }
                 LevelMeter(meter: meter)
             }
-            TagRow(ui: ui)
+            if key != nil { TagRow(ui: ui) }
+            else if let r = shown, !r.tag.isEmpty {
+                Text("🏷 " + r.tag + (r.tagBy.isEmpty ? "" : "（\(r.tagBy)）")).font(.system(size: 13)).foregroundStyle(Color(hex: 0x93C5FD))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             HStack {
                 HStack(spacing: 14) {
                     HStack(spacing: 4) { Led(on: ui.ledTx, color: PC.tx); Text("TX").font(.system(size: 11, weight: .heavy)).foregroundStyle(PC.muted) }
                     HStack(spacing: 4) { Led(on: ui.ledRx, color: PC.rx); Text("RX").font(.system(size: 11, weight: .heavy)).foregroundStyle(PC.muted) }
                 }
                 Spacer()
-                Text(ui.statusText).font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(statusColor)
+                Text(key != nil ? ui.statusText : "入室していません").font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(key != nil ? statusColor : PC.muted)
             }
             Divider().overlay(Color(hex: 0x2D3748))
-            peers
-            Text("接続 \(ui.connN) / 在室 \(ui.connM)").font(.system(size: 12, weight: .bold, design: .monospaced))
+            if key != nil { peers } else { idlePeers }
+            if key != nil { Text("接続 \(ui.connN) / 在室 \(ui.connM)" + (ui.connAudio < ui.connN ? "（音声OK \(ui.connAudio)）" : "")).font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundStyle(ui.connN >= ui.connM ? PC.botGreen : Color(hex: 0xFACC15))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(maxWidth: .infinity, alignment: .trailing) }
         }
         .padding(16)
         .background(PC.panel, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(hex: 0x22272E), lineWidth: 2))
+    }
+
+    /// 入室前: 液晶に出している部屋にいる人の名札と人数。
+    private var idlePeers: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let r = shown {
+                if r.names.isEmpty {
+                    Text(r.invited ? "招待された部屋（現在は無人）" : "（いま誰もいません）").font(.system(size: 13)).foregroundStyle(PC.muted).opacity(0.6)
+                } else {
+                    FlowLayout(spacing: 4) { ForEach(r.names, id: \.self) { chip($0, fg: PC.muted, bg: PC.chip, bold: false) } }
+                }
+                Text("👤 \(r.count)人").font(.system(size: 12)).foregroundStyle(PC.muted).frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                Text("左のタブから部屋を探せます").font(.system(size: 13)).foregroundStyle(PC.muted).opacity(0.6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var statusColor: Color {
@@ -137,12 +374,19 @@ private struct DisplayPanel: View {
     private var peers: some View {
         let myName = ui.nickname.trimmingCharacters(in: .whitespaces).isEmpty ? "NoName" : ui.nickname.trimmingCharacters(in: .whitespaces)
         return FlowLayout(spacing: 4) {
-            chip((ui.ledTx ? "🎙️ " : "") + myName + "（自分）", fg: ui.ledTx ? Color(hex: 0xFECACA) : Color(hex: 0xBFDBFE),
+            chip((ui.logRec ? "💾" : "") + myName + "（自分）", fg: ui.ledTx ? Color(hex: 0xFECACA) : Color(hex: 0xBFDBFE),
                  bg: ui.ledTx ? Color(hex: 0x7F1D1D) : Color(hex: 0x172554), bold: ui.ledTx)
             ForEach(ui.peers) { p in
-                chip((p.talking ? "🎙️ " : "") + p.name, fg: p.talking ? PC.botGreen : PC.muted, bg: p.talking ? Color(hex: 0x064E3B) : PC.chip, bold: p.talking)
+                chip(p.name, fg: p.talking ? PC.botGreen : PC.muted, bg: p.talking ? Color(hex: 0x064E3B) : PC.chip, bold: p.talking)
             }
-            if ui.peers.isEmpty {
+            // 一覧にはいるのに、まだ音声がつながっていない人: 赤いチップ (つながったら消える)
+            ForEach(Array(ui.missingNames.enumerated()), id: \.offset) { _, n in
+                chip(n, fg: Color(hex: 0xFECACA), bg: Color(hex: 0x450A0A), bold: false)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: 0xEF4444), lineWidth: 1))
+                    .contextMenu { Text("一覧にはいますが、まだつながっていません") }
+                    .accessibilityHint("一覧にはいますが、まだつながっていません")
+            }
+            if ui.peers.isEmpty && ui.missingNames.isEmpty {
                 Text("（ほかの参加者を待っています）").font(.system(size: 13)).foregroundStyle(PC.muted).opacity(0.6).padding(.vertical, 2)
             }
         }
@@ -220,7 +464,7 @@ private struct TagRow: View {
             HStack(spacing: 8) {
                 label.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 // おうむ返しボットの部屋は、説明のタグを守るため、編集できない
-                if ui.currentKey != botRoomKey {
+                if !isBotRoom(ui.currentKey) {
                     Button(ui.roomTag.isEmpty ? "つける" : "変える") {
                         editing.toggle()
                         if editing { draft = ui.roomTag; focused = true }
@@ -256,9 +500,26 @@ private struct TagRow: View {
 }
 
 /// 話すボタン (押している間だけ話す) と、VOX の丸ボタン。
+private struct CardHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+struct ConfirmRequest: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let okLabel: String
+    let action: () -> Void
+}
+
+struct IdleButton { let title: String; let sub: String; let action: () -> Void }
+
 private struct PttSection: View {
     let ui: UiState
-    private let circle: CGFloat = 170
+    /// 入室前の大きなボタン (NEW / JOIN)。あれば、話すボタンの代わりに出す
+    var idle: IdleButton?
+    private let circle: CGFloat = 180
     @State private var gesture: PttGesture?
     @State private var holdTimer: DispatchWorkItem?
 
@@ -283,12 +544,34 @@ private struct PttSection: View {
             ZStack(alignment: .topLeading) {
                 pttCircle.offset(x: circleLeft)
                 VoxButton(on: ui.voxOn).offset(x: voxLeft, y: circle - 62 + 14)
+                    .opacity(idle == nil ? 1 : 0.45).allowsHitTesting(idle == nil)
             }
         }
         .frame(height: circle + 14)
     }
 
     private var pttCircle: some View {
+        if let idle { return AnyView(idleCircle(idle)) }
+        return AnyView(talkCircle)
+    }
+
+    private func idleCircle(_ b: IdleButton) -> some View {
+        Button(action: b.action) {
+            ZStack {
+                Circle().fill(RadialGradient(colors: [Color(hex: 0x3B82F6), Color(hex: 0x1D4ED8)], center: .center, startRadius: 0, endRadius: 100))
+                Circle().stroke(Color(hex: 0x1E3A8A), lineWidth: 6)
+                VStack(spacing: 2) {
+                    Text(b.title).font(.system(size: 24, weight: .black)).foregroundStyle(.white)
+                    Text(b.sub).font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.9))
+                }
+            }
+            .frame(width: circle, height: circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(b.title == "JOIN" ? "入室" : "新しい部屋を作る")
+    }
+
+    private var talkCircle: some View {
         let tx = ui.ledTx
         return ZStack {
             Circle().fill(RadialGradient(colors: tx ? [Color(hex: 0xEF4444), Color(hex: 0xB91C1C)] : [Color(hex: 0x3B82F6), Color(hex: 0x1D4ED8)],

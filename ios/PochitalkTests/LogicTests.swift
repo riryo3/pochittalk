@@ -37,6 +37,19 @@ final class LogicTests: XCTestCase {
         XCTAssertEqual(PochiEngine.roomKey(from: URL(string: "pochitalk://join?r=1234abcd")!), "1234abcd")
         XCTAssertNil(PochiEngine.roomKey(from: URL(string: "https://example.com/?r=zzz")!))
         XCTAssertEqual(formatKey("7a0b07c1"), "7A0B·07C1")
+        // 36 種類 (a〜z, 0〜9) の部屋番号。16 進の古い部屋とおうむの部屋は、そのまま通る
+        XCTAssertTrue(isRoomKey("zz09az19"))
+        XCTAssertTrue(isRoomKey(botRoomKey))
+        // おうむの部屋: 新 (22360679 = 2236·0679) と旧 (7a0b07c1) のどちらでも、おうむの部屋
+        XCTAssertEqual(botRoomKey, "22360679")
+        XCTAssertEqual(formatKey(botRoomKey), "2236·0679")
+        XCTAssertTrue(isBotRoom("22360679")); XCTAssertTrue(isBotRoom("7a0b07c1"))
+        XCTAssertFalse(isBotRoom("5a5a1111")); XCTAssertFalse(isBotRoom(nil))
+        XCTAssertFalse(isRoomKey("zz09az1"))
+        XCTAssertFalse(isRoomKey("zz09az1-"))
+        XCTAssertFalse(isRoomKey("ZZ09AZ19"))
+        XCTAssertEqual(PochiEngine.roomKey(from: URL(string: "https://pochittalk.ryota-softwares.workers.dev/?r=ZZ09AZ19")!), "zz09az19")
+        XCTAssertEqual(formatKey("zz09az19"), "ZZ09·AZ19")
     }
 
     func testTurnResponseParsing() {
@@ -64,5 +77,19 @@ final class SdpTests: XCTestCase {
         XCTAssertEqual(Sdp.mediaSectionCount(sdp), 1)
         XCTAssertEqual(Sdp.mediaSectionCount("v=0\r\ns=-\r\nt=0 0\r\n"), 0)
         XCTAssertEqual(Sdp.mediaSectionCount("v=0\nm=audio 9 RTP/AVP 0\nm=video 9 RTP/AVP 96\n"), 2)
+    }
+
+    func testMissingNames() {
+        // 一覧に 3 人、つながっているのは 1 人 → 残り 2 人が未接続
+        XCTAssertEqual(PochiEngine.missingNames(listed: ["Aさん", "Bさん", "Cさん"], connected: ["Bさん"]), ["Aさん", "Cさん"])
+        // 全員つながっていれば、空
+        XCTAssertEqual(PochiEngine.missingNames(listed: ["A", "B"], connected: ["B", "A"]), [])
+        // 同じ名前が 2 人: つながっているのが 1 人なら、1 人ぶん残る (個数で突き合わせる)
+        XCTAssertEqual(PochiEngine.missingNames(listed: ["同名", "同名"], connected: ["同名"]), ["同名"])
+        // 12 文字より長い名前は、先頭 12 文字で突き合わせる
+        XCTAssertEqual(PochiEngine.missingNames(listed: ["123456789012"], connected: ["123456789012345"]), [])
+        // 名前がまだ届いていない相手 (接続中...) の数だけ、残りから外す
+        XCTAssertEqual(PochiEngine.missingNames(listed: ["A", "B"], connected: ["接続中..."]), ["B"])
+        XCTAssertEqual(PochiEngine.missingNames(listed: [], connected: ["A"]), [])
     }
 }

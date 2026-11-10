@@ -47,6 +47,14 @@ struct SettingsView: View {
                     }
                     Text("スライダーを離すと、試しに「ガッ」と鳴ります（通話中のみ）。効果音を消したいときは、音量を 0% にしてください。").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("新しい部屋") {
+                    Toggle("新しい部屋ができたら、音で知らせる", isOn: Binding(get: { ui.notifyRoom }, set: { engine.setNotifyRoom($0) }))
+                    Text("音だけで知らせます（画面の知らせや、OS の通知は出しません）。効果音がオンのときに鳴ります。オンにすると、確かめに1回鳴ります。").font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("通信の記録") {
+                    Toggle("通信の記録を、この端末に残す", isOn: Binding(get: { ui.logRec }, set: { engine.setLogRec($0) }))
+                    Text("オフのとき（標準）は、通信の記録をこの端末に保存せず、画面の中（メモリ）だけに置きます。オンにすると、最大300行をこの端末に保存します（外部へは送りません。オフにすると消します）。オンの間は、ハンドルネームの前に 💾 が付き、同じ部屋の人にも見えます。").font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("画面を消しているとき") {
                     Text("部屋に入っている間は、画面を消したり、ほかのアプリを開いたりしても通話が続き、VOX も使えます（画面上部にマイクの表示が出ます）。部屋を出ると、マイクを手放します。").font(.footnote)
                     Text("電話がかかってきたときは通話が一時止まり、終わると自動で戻ります。").font(.footnote).foregroundStyle(.secondary)

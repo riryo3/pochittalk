@@ -5,6 +5,19 @@ import hashlib, os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUNDLE_ID = "app.pochitalk.ios"
+TEAM = None
+
+# Xcode で入力した「開発チーム」と「アプリのバンドルID」は、作り直しても残す (すでにある project.pbxproj から読み取る)
+import re
+_old = os.path.join(ROOT, "Pochitalk.xcodeproj", "project.pbxproj")
+if os.path.exists(_old):
+    _t = open(_old).read()
+    _m = re.search(r"DEVELOPMENT_TEAM = ([A-Z0-9]+);", _t)
+    if _m: TEAM = _m.group(1)
+    _ids = [x for x in re.findall(r"PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);", _t) if not x.endswith(".tests")]
+    if _ids: APP_BUNDLE_ID = _ids[0]
+try: APP_BUNDLE_ID
+except NameError: APP_BUNDLE_ID = BUNDLE_ID
 VERSION = "0.1.0"
 BUILD = "1"
 DEPLOY = "16.0"
@@ -143,17 +156,18 @@ app_settings = {
     "CODE_SIGN_STYLE": "Automatic", "CURRENT_PROJECT_VERSION": BUILD, "MARKETING_VERSION": VERSION,
     "INFOPLIST_FILE": "Pochitalk/Info.plist", "GENERATE_INFOPLIST_FILE": "NO",
     "LD_RUNPATH_SEARCH_PATHS": '"$(inherited) @executable_path/Frameworks"',
-    "PRODUCT_BUNDLE_IDENTIFIER": BUNDLE_ID, "PRODUCT_NAME": '"$(TARGET_NAME)"',
-    "SWIFT_EMIT_LOC_STRINGS": "YES", "TARGETED_DEVICE_FAMILY": '"1"', "SUPPORTS_MACCATALYST": "NO",
+    "PRODUCT_BUNDLE_IDENTIFIER": APP_BUNDLE_ID, "PRODUCT_NAME": '"$(TARGET_NAME)"',
+    "SWIFT_EMIT_LOC_STRINGS": "YES", "TARGETED_DEVICE_FAMILY": '"1,2"', "SUPPORTS_MACCATALYST": "NO",
     "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD": "NO",
 }
+if TEAM: app_settings["DEVELOPMENT_TEAM"] = TEAM
 app_dbg = cfg("app:debug", "Debug", app_settings); app_rel = cfg("app:release", "Release", app_settings)
 app_list = cfglist("app:list", [app_dbg, app_rel])
 test_settings = {
     "BUNDLE_LOADER": '"$(TEST_HOST)"', "GENERATE_INFOPLIST_FILE": "YES", "CURRENT_PROJECT_VERSION": BUILD,
     "MARKETING_VERSION": VERSION, "PRODUCT_BUNDLE_IDENTIFIER": BUNDLE_ID + ".tests", "PRODUCT_NAME": '"$(TARGET_NAME)"',
     "TEST_HOST": '"$(BUILT_PRODUCTS_DIR)/Pochitalk.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Pochitalk"',
-    "TARGETED_DEVICE_FAMILY": '"1"', "CODE_SIGN_STYLE": "Automatic",
+    "TARGETED_DEVICE_FAMILY": '"1,2"', "CODE_SIGN_STYLE": "Automatic",
 }
 test_dbg = cfg("test:debug", "Debug", test_settings); test_rel = cfg("test:release", "Release", test_settings)
 test_list = cfglist("test:list", [test_dbg, test_rel])

@@ -22,6 +22,14 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
     private(set) var keepRunning = false
     /// 送信中だけ true。
     var transmitting = false
+    /// モールス送信: true のあいだ、マイクの代わりに 700Hz の純音を送る。`morseKey` が押している状態。
+    var morseMode = false
+    var morseKey = false
+    /// 送る純音の周波数 (モールスは 700Hz。FAX は、行の中で切り替える) と、大きさ
+    var toneHz = 700.0
+    var toneAmp: Float = 0.35
+    private var mPhase = 0.0
+    private var mGain: Float = 0
     /// 入力ゲイン (線形値)。
     var gain: Float = 1
     /// スピーカーのミュート (相手の声と効果音を止める)。
@@ -276,6 +284,19 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
             // 立ち上がりは即座に、下がりはゆっくり (Android 版 MicMonitor と同じ平滑化)
             micLevel = rms > micLevel ? rms : micLevel * 0.85 + rms * 0.15
             lastCaptureAt = ProcessInfo.processInfo.systemUptime
+        }
+        if morseMode {
+            // マイクの音を、モールスの純音に置き換える (立ち上がり・立ち下がりは 4ms ほどなめらかに: クリック音を避ける)
+            let rate = sampleRate
+            let step = 2 * Double.pi * toneHz / rate
+            let target: Float = morseKey ? toneAmp : 0
+            let a = Float(1 - exp(-1 / (0.004 * rate)))
+            for i in 0..<n {
+                mGain += (target - mGain) * a
+                capBuf[i] = Int16(sin(mPhase) * Double(mGain) * 32767)
+                mPhase += step
+                if mPhase > 2 * Double.pi { mPhase -= 2 * Double.pi }
+            }
         }
         if rtcRecording, transmitting, let d = delegate {
             return withUnsafePointer(to: &abl) { p in

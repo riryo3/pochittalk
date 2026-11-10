@@ -154,6 +154,9 @@ final class TrysteroRoom {
         leaveAction.onMessage = { [weak self] _, id in self?.exitPeer(id, nil) }
     }
 
+    /// 音声が通っている相手の数 (自分を含まない)。在室通知の cn。
+    func goodLinkCount() -> Int { slots.values.filter { $0.active && $0.peer.audioOK() }.count }
+
     func fetchInboundAudioLevel(peerId: String, _ cb: @escaping (Double?) -> Void) {
         if let slot = slots[peerId] { slot.peer.fetchInboundAudioLevel(cb) } else { cb(nil) }
     }

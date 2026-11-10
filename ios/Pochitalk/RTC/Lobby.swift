@@ -3,7 +3,7 @@ import WebRTC
 
 /// 部屋一覧 (在室通知)。通話の接続 (WebRTC) とは別に、Nostr リレーに「いま自分はこの部屋にいる」を流して、
 /// 他の人の通知を集める。Web 版 (worker.js の presence*) と同じ形:
-///   イベント kind 29334 / タグ ["x","pochitalk-presence-v1"] / content = {ch, talking, name, tag, by, at}
+///   イベント kind 29334 / タグ ["x","pochitalk-presence-v1"] / content = {ch, cn, ag, talking, name, tag, by, at}  (cn=音声が通る相手の数, ag=入室からの秒数)
 ///   購読は since = いまの5秒前。同じイベントが複数のリレーから届くので id で重複を捨てる。
 final class PresenceClient {
     private var seen: [String: Int] = [:]

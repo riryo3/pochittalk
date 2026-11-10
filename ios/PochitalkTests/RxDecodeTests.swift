@@ -54,4 +54,19 @@ final class RxDecodeTests: XCTestCase {
         XCTAssertEqual(g?[13][29], true)
         XCTAssertNil(FaxReceiver.payloadToGrid(["c": 30, "d": "AAAA"])) // 短すぎる
     }
+
+    /// 送信側の絵づくり: 14 行・幅 240 以内で、字のインクがあり、データ便の形式で往復できる。
+    func testFaxTextGridRoundTrip() {
+        let grid = FaxText.grid("FAX 12")
+        XCTAssertEqual(grid.count, FaxReceiver.textRows)
+        let cols = grid[0].count
+        XCTAssertTrue(cols > 20 && cols <= FaxPaper.cols, "cols=\(cols)")
+        XCTAssertTrue(grid.joined().contains(true))
+        // 上下が逆さまでないこと: 先頭の「F」は、一番上の行に横棒 (左端 10 列のインクが多い)、一番下の行は縦棒だけ (少ない)
+        let top = grid[0].prefix(10).filter { $0 }.count, bottom = grid[13].prefix(10).filter { $0 }.count
+        XCTAssertTrue(top >= 6 && bottom <= 4, "top=\(top) bottom=\(bottom)")
+        let back = FaxReceiver.payloadToGrid(FaxText.payload(grid))
+        XCTAssertEqual(back, grid)
+        for r in grid { print(String(r.map { $0 ? "#" : "." })) }
+    }
 }
