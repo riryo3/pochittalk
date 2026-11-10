@@ -21,7 +21,11 @@ object Runtime {
     val dispatcher = Executors.newSingleThreadExecutor { r -> Thread(r, "pochi-engine") }.asCoroutineDispatcher()
     val scope = CoroutineScope(SupervisorJob() + dispatcher + handler)
 
+    /** 通信の記録を端末に残すモードのときだけ設定される。標準は null (保存しない)。 */
+    @Volatile var logSink: ((String) -> Unit)? = null
+
     fun log(msg: String) {
         Log.d(TAG, msg)
+        logSink?.invoke(msg)
     }
 }

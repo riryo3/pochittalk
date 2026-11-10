@@ -274,6 +274,17 @@ object Fax {
         }
     }
 
+    /** 14 行の絵を、`faxPage` のデータ便 {c, d} にする (payloadToGrid の逆。1 行は ceil(c/8) バイト、左端が最上位ビット)。 */
+    fun gridToPayload(grid: Array<BooleanArray>): Pair<Int, String> {
+        val cols = grid[0].size
+        val bpr = (cols + 7) / 8
+        val bin = ByteArray(bpr * TEXT_ROWS)
+        for (y in 0 until TEXT_ROWS) for (x in 0 until cols) {
+            if (grid[y][x]) bin[y * bpr + x / 8] = (bin[y * bpr + x / 8].toInt() or (0x80 shr (x % 8))).toByte()
+        }
+        return cols to java.util.Base64.getEncoder().encodeToString(bin)
+    }
+
     /**
      * 紙に何ミリ秒で何行目が出るか (送信側と同じ進行表)。空行は短く、本文行は同期150ms+幅ぶん。
      * 戻り値は (行の番号 0..14, 出る時刻 ms) の並び。0 行目は余白。

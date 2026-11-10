@@ -27,6 +27,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.text.withLink
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -102,10 +104,10 @@ private class SearchFilter(val text: String, val hex: String?, val exact: String
 private fun parseSearch(q: String): SearchFilter? {
     val s = q.trim()
     if (s.isEmpty()) return null
-    val m = Regex("[?&]r=([0-9a-fA-F]{8})(?![0-9a-fA-F])").find(s)
+    val m = Regex("[?&]r=([0-9a-zA-Z]{8})(?![0-9a-zA-Z])").find(s)
     val hexq = s.lowercase().replace(Regex("[· -]"), "") // 区切り (· - 空白) を無視する
-    val isHex = Regex("^[0-9a-f]{2,8}$").matches(hexq)
-    val exact = m?.groupValues?.get(1)?.lowercase() ?: if (Regex("^[0-9a-f]{8}$").matches(hexq)) hexq else null
+    val isHex = Regex("^[0-9a-z]{2,8}$").matches(hexq)
+    val exact = m?.groupValues?.get(1)?.lowercase() ?: if (Regex("^[0-9a-z]{8}$").matches(hexq)) hexq else null
     return SearchFilter(s.lowercase(), if (isHex) hexq else null, exact)
 }
 
@@ -118,7 +120,7 @@ private fun matchSearch(room: RoomInfo, f: SearchFilter): Boolean {
 
 /** 「いまある部屋」の一覧。ホーム画面と無線機画面の両方に出す。検索・話題タグ付き。 */
 @Composable
-fun RoomListCard(state: UiState, onJoin: (String) -> Unit, showReconnect: Boolean = false) {
+fun RoomListCard(state: UiState, onJoin: (String) -> Unit, showReconnect: Boolean = false, onCenter: (String?) -> Unit = {}) {
     var query by rememberSaveable { mutableStateOf("") }
     val filter = parseSearch(query)
     var all = state.rooms
@@ -154,6 +156,7 @@ fun RoomListCard(state: UiState, onJoin: (String) -> Unit, showReconnect: Boolea
         }
         // 先頭: ボットの部屋、招待された部屋 (Web版と同じ並び)
         var ordered = shown
+        // 先頭: おうむの部屋 (新しい番号だけ。旧い番号は、ふつうの部屋と同じ並び)
         ordered = listOfNotNull(ordered.firstOrNull { it.key == BOT_ROOM_KEY }) + ordered.filter { it.key != BOT_ROOM_KEY }
         state.pendingKey?.let { pk -> ordered = listOfNotNull(ordered.firstOrNull { it.key == pk }) + ordered.filter { it.key != pk } }
         RoomDial(
@@ -166,7 +169,25 @@ fun RoomListCard(state: UiState, onJoin: (String) -> Unit, showReconnect: Boolea
                 else -> "スキャン中..."
             },
             onJoin = onJoin,
+            onCenter = onCenter,
         )
+        // 応援のお願い (ダイヤルの下)
+        Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("応援お願いします。", color = PochiColors.Text, fontSize = 13.sp)
+            val uri = androidx.compose.ui.platform.LocalUriHandler.current
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SubButton(onClick = { uri.openUri("https://ofuse.me/ryotasoftware") }, modifier = Modifier.weight(1f), container = Color(0xFF1E293B)) {
+                    Text("💌", fontSize = 18.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("OFUSE", fontSize = 14.sp, maxLines = 1)
+                }
+                SubButton(onClick = { uri.openUri("https://buymeacoffee.com/ryota_software") }, modifier = Modifier.weight(1f), container = Color(0xFF1E293B)) {
+                    Text("☕", fontSize = 18.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Coffee", fontSize = 14.sp, maxLines = 1)
+                }
+            }
+        }
     }
 }
 

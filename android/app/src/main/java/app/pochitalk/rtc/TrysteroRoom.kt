@@ -88,6 +88,9 @@ class TrysteroRoom internal constructor(
     /** 入室扱いになった (確認が済んだ) 相手の id。 */
     val peerIds: Set<String> get() = slots.values.filter { it.active }.map { it.id }.toSet()
 
+    /** 音声が通っている相手の数 (自分を含まない。Web版の goodLinkCount)。 */
+    fun goodLinkCount(): Int = slots.values.count { it.active && !it.peer.audioStuck() }
+
     // ================================================================ アクション
 
     inner class Action(val type: String, val sendToPending: Boolean = false, val receiveWhilePending: Boolean = false) {

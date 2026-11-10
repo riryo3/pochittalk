@@ -76,6 +76,24 @@ data class UiState(
     val autoReconnect: Boolean = false,
     /** 「接続 N / 在室 M」。N = つながっている人 + 自分、M = 部屋一覧の人数 (N 未満にはしない)。入室していなければ 0。 */
     val connectedCount: Int = 0,
+    /** 一覧 (ロビー) にはいるが、まだ音声がつながっていない人の名前 (先頭 12 文字)。つながったら消える。 */
+    val missingNames: List<String> = emptyList(),
+    /** 新しい部屋ができたら音で知らせる (初期オフ)。 */
+    val notifyRoom: Boolean = false,
+    /** 通信の記録を端末に残す (初期オフ)。オンの間は名前の前に 💾 が付く。 */
+    val logMode: Boolean = false,
+    /** 利用上の注意に同意済みか (同意した版が、いまの版と同じ)。 */
+    val consentOk: Boolean = true,
+    /** モールス送信の待ち行列 (まだ送っていない文字) と、送信中か。 */
+    val morseQueued: String = "",
+    val morseSending: Boolean = false,
+    /** FAXモード (隠し): 「fax」と打つと入る。打った文字と、ESC で出る。 */
+    val faxMode: Boolean = false,
+    val faxText: String = "",
+    /** 音声が通っている人数 (自分を含む)。「接続」より少ないときだけ、バッジに「（音声OK k）」を足す。 */
+    val audioOkCount: Int = 0,
+    /** つながりの順位で、自分が「入り直す番」か (Web版の linkRanking)。 */
+    val rejoinTurn: Boolean = false,
     val presentCount: Int = 0,
 )
 
@@ -87,7 +105,11 @@ sealed interface UiEvent {
 
 fun formatKey(key: String): String = key.take(4).uppercase() + "·" + key.drop(4).uppercase()
 
-fun isRoomKey(s: String?): Boolean = s != null && Regex("^[0-9a-f]{8}$").matches(s)
+/** 部屋番号: 小文字の a〜z・0〜9 の 8 桁 (16進だけだった旧い部屋も、そのまま通る)。 */
+fun isRoomKey(s: String?): Boolean = s != null && Regex("^[0-9a-z]{8}$").matches(s)
 
 /** 受信中の FAX の紙 (Web版と同じ 15 行。[shownRows] 行目まで出ている)。黒い画素は [black] (行 × 列)。 */
 class FaxPaper(val cols: Int, val black: BooleanArray, val shownRows: Int, val from: String)
+
+/** おうむ返しの部屋か (新旧どちらの番号でも真)。🦜 の印・固定のタグ・先頭表示・新しい部屋の音を鳴らさない、に使う。 */
+fun isBotRoom(k: String?): Boolean = k == PochiEngine.BOT_ROOM_KEY || k == PochiEngine.BOT_ROOM_OLD
