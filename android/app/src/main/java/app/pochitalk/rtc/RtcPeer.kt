@@ -14,6 +14,7 @@ import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
+import org.webrtc.RtpTransceiver
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpSender
@@ -207,6 +208,22 @@ class RtcPeer(
         ) return Health.STALE
         if (ch == null || chs != DataChannel.State.OPEN) return Health.TRANSIENT
         return Health.LIVE
+    }
+
+    /**
+     * 音声が通っていない相手か (Web版の audioStuck)。つながっていない、または送信用トランシーバの
+     * 音声の取り決め (currentDirection) が決まらないままなら true。
+     */
+    fun audioStuck(): Boolean = try {
+        val conn = pc
+        if (conn == null || conn.connectionState() != PeerConnection.PeerConnectionState.CONNECTED) true
+        else conn.transceivers.any { t ->
+            t.sender.track() != null &&
+                (t.direction == RtpTransceiver.RtpTransceiverDirection.SEND_RECV || t.direction == RtpTransceiver.RtpTransceiverDirection.SEND_ONLY) &&
+                t.currentDirection == null
+        }
+    } catch (_: Throwable) {
+        false
     }
 
     /** 相手から届いた signal (オファー / アンサー / 候補) を処理する。 */

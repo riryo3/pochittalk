@@ -18,6 +18,7 @@ final class RadioSounds {
     func playBusy() { play("busy", cached: true) { synthBusy($0) } }
     func playCrosstalk() { play("crosstalk", cached: false) { synthCrosstalk($0) } }
     func playTune() { play("tune", cached: false) { synthTune($0) } }
+    func playNewRoom() { play("newroom", cached: true) { synthNewRoom($0) } }
     func playEnter() { play("enter", cached: true) { synthEnter($0) } }
 
     private func play(_ name: String, cached: Bool, _ synth: (Double) -> [Float]) {
@@ -134,6 +135,27 @@ final class RadioSounds {
         note(1046.5, 0, 0.09, 0.07)
         note(1568.0, 0.08, 0.60, 0.07)
         note(3136.0, 0.08, 0.30, 0.015)
+        return f
+    }
+
+    /// 新しい部屋ができた知らせ: 三角波の 5 音が上がっていく (約 0.9 秒。最後の音が余韻)。入室音とは別の音。
+    private func synthNewRoom(_ rate: Double) -> [Float] {
+        let total = Int(rate * 0.95)
+        var f = [Float](repeating: 0, count: total)
+        func tri(_ phase: Double) -> Double { 2 * abs(2 * (phase - floor(phase + 0.5))) - 1 }
+        func note(_ freq: Double, _ start: Double, _ dur: Double, _ vol: Double) {
+            let s0 = Int(start * rate), len = Int(dur * rate)
+            for i in 0..<len where s0 + i < total {
+                let t = Double(i) / rate
+                let env = t < 0.01 ? 0.001 * pow(vol / 0.001, t / 0.01) : vol * pow(0.001 / vol, (t - 0.01) / (dur - 0.01))
+                f[s0 + i] += Float(tri(freq * t) * env)
+            }
+        }
+        let freqs = [659.3, 784.0, 1046.5, 1318.5, 2093.0]
+        for (i, hz) in freqs.enumerated() {
+            let start = Double(i) * 0.09
+            note(hz, start, i == freqs.count - 1 ? 0.55 : 0.16, 0.07)
+        }
         return f
     }
 

@@ -7,11 +7,7 @@ struct PochiRoot: View {
     var body: some View {
         ZStack {
             PC.bg.ignoresSafeArea()
-            if engine.ui.currentKey == nil {
-                HomeScreen(ui: engine.ui, engine: engine)
-            } else {
-                RadioScreen(ui: engine.ui, engine: engine)
-            }
+            RadioScreen(ui: engine.ui, engine: engine)
         }
         .preferredColorScheme(.dark)
         #if DEBUG

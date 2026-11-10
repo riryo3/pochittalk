@@ -33,13 +33,47 @@ class MicGain : ExternalAudioProcessingFactory.AudioProcessing {
     @Volatile var testTone: Boolean = false
     private var phase = 0.0
 
-    override fun initialize(sampleRateHz: Int, numChannels: Int) {}
+    /**
+     * モールス送信中は true。マイクの音を捨てて、代わりに 700Hz の音 ([keyDown] の間だけ) を送信に入れる。
+     * Web版の morseOsc (700Hz・音量 0.35・立ち上がり 4ms) と同じ。受信側が同じ復号で読める。
+     */
+    @Volatile var morseMode: Boolean = false
+    @Volatile var keyDown: Boolean = false
+    /** 送る音の高さ (Hz) と音量 (満点 = 1.0)。モールスは 700Hz・0.35、FAX は 0.2 で高さを切り替える (Web版と同じ)。 */
+    @Volatile var toneFreq: Double = 700.0
+    @Volatile var tonePeak: Float = 0.35f
+    private var freqNow = 700.0
+    @Volatile private var rate = 48000
+    private var morsePhase = 0.0
+    private var env = 0f
 
-    override fun reset(newRate: Int) {}
+    override fun initialize(sampleRateHz: Int, numChannels: Int) { rate = sampleRateHz }
+
+    override fun reset(newRate: Int) { rate = newRate }
+
+    private fun fillMorse(fb: java.nio.FloatBuffer) {
+        val sr = rate.toDouble()
+        val alpha = (1.0 - Math.exp(-1.0 / (0.004 * sr))).toFloat()
+        val alphaF = 1.0 - Math.exp(-1.0 / (0.002 * sr)) // 高さの切り替えは 2ms で滑らかに (Web版の setTargetAtTime と同じ)
+        val peak = tonePeak * 32767f
+        val target = if (keyDown) 1f else 0f
+        val tf = toneFreq
+        for (i in 0 until fb.limit()) {
+            env += (target - env) * alpha
+            freqNow += (tf - freqNow) * alphaF
+            fb.put(i, (env * peak * sin(morsePhase)).toFloat())
+            morsePhase += 2 * PI * freqNow / sr
+            if (morsePhase > 2 * PI) morsePhase -= 2 * PI
+        }
+    }
 
     override fun process(numBands: Int, numFrames: Int, buffer: ByteBuffer) {
         val now = System.currentTimeMillis()
         lastProcessAt = now
+        if (morseMode) {
+            fillMorse(buffer.order(ByteOrder.nativeOrder()).asFloatBuffer())
+            return
+        }
         if (muted) {
             // 送信しない間は、全部ゼロにする
             val z = buffer.order(ByteOrder.nativeOrder()).asFloatBuffer()

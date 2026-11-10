@@ -114,6 +114,17 @@ final class RtcPeer: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate
         return .live
     }
 
+    /// 音声が通る相手か。つながっていても、音声の取り決めが外れている (送るトラックがあるのに向きが決まらない) 相手は数えない (Web 版 audioStuck の逆)。
+    func audioOK() -> Bool {
+        guard !isDead, let conn = pc, conn.connectionState == .connected else { return false }
+        for t in conn.transceivers {
+            guard t.sender.track != nil, t.direction == .sendRecv || t.direction == .sendOnly else { continue }
+            var cur = RTCRtpTransceiverDirection.inactive
+            if !t.currentDirection(&cur) { return false } // currentDirection が null のまま
+        }
+        return true
+    }
+
     func signal(_ type: String, _ sdp: String) {
         guard !isDead else { return }
         RT.post { [weak self] in self?.handleSignal(type, sdp) }

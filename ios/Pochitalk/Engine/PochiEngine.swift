@@ -82,6 +82,10 @@ final class PochiEngine: ObservableObject {
     private func peer(_ id: String) -> PeerState? { peers.first { $0.id == id }?.state }
 
     private var myNickname = ""
+    /// 名前の表示: 通信の記録をとっている間は、前に 💾 を付けて、同じ部屋の人にも見えるようにする
+    private var shownName: String { (st.logRec ? "💾" : "") + myNickname }
+    private var launchMs = 0
+    private var roomChimeAt: [String: Int] = [:]
     private var currentKey: String?
     private var pendingKey: String?
     private var roomMeta = (tag: "", by: "", at: 0)
@@ -131,6 +135,10 @@ final class PochiEngine: ObservableObject {
             st.micGainDb = gainDb
             device.gain = Float(pow(10.0, Double(gainDb) / 20))
             st.welcomeOn = defaults.string(forKey: "pochitalk_welcome") != "off"
+            st.notifyRoom = defaults.string(forKey: "pochitalk_notify_room") == "on"
+            st.logRec = defaults.string(forKey: "pochitalk_log_rec") == "on"
+            launchMs = RT.nowMs()
+            if st.logRec { logBuffer = defaults.stringArray(forKey: "pochitalk_diag_log") ?? [] }
             let sfx = min(150, max(0, defaults.object(forKey: "pochitalk_sfx_vol") as? Int ?? 100))
             st.sfxVolume = sfx
             sounds.volume = Float(sfx) / 100
@@ -200,13 +208,69 @@ final class PochiEngine: ObservableObject {
 
     /// 「接続 N / 在室 M」: N = 実際につながっている人数 + 自分、M = 在室の一覧の人数 (N 未満にはしない)。
     private func refreshCounts() {
-        guard let cur = currentKey, room != nil else { st.connN = 0; st.connM = 0; return }
+        guard let cur = currentKey, room != nil else { st.connN = 0; st.connM = 0; st.missingNames = []; return }
         let n = peers.count + 1
         let listed = lobbyEntries.values.filter { $0.key == cur }.count + 1
         st.connN = n; st.connM = max(n, listed)
+        st.connAudio = (room?.goodLinkCount() ?? 0) + 1 // 音声が通っている人数 (自分を含む)
+        // 未接続: 一覧にはいるのに、まだつながっていない人
+        st.missingNames = Self.missingNames(listed: lobbyEntries.values.filter { $0.key == cur }.map { $0.name },
+                                            connected: peers.map { $0.state.name })
+    }
+
+    /// 新しい部屋ができたら、音だけで知らせる (画面の知らせや OS の通知は出さない)。
+    /// 条件: 設定オン / 効果音オン / 起動から 12 秒より後 / いまの部屋でも、おうむの部屋でもない / 同じ部屋は 10 分に 1 回まで。
+    private func chimeNewRoom(_ key: String) {
+        guard st.notifyRoom, sounds.volume > 0, RT.nowMs() - launchMs > 12_000,
+              key != currentKey, !isBotRoom(key) else { return }
+        let now = RT.nowMs()
+        if let last = roomChimeAt[key], now - last < 600_000 { return }
+        roomChimeAt[key] = now
+        sounds.playNewRoom()
+    }
+
+    func setNotifyRoom(_ on: Bool) {
+        RT.post { [self] in
+            st.notifyRoom = on
+            if on { defaults.set("on", forKey: "pochitalk_notify_room"); sounds.playNewRoom() } // 確かめに 1 回鳴らす
+            else { defaults.removeObject(forKey: "pochitalk_notify_room") }
+            commit()
+        }
+    }
+
+    /// 通信の記録を、この端末に残す (最大 300 行)。オフにしたら消す。外部へは送らない。
+    func setLogRec(_ on: Bool) {
+        RT.post { [self] in
+            st.logRec = on
+            if on { defaults.set("on", forKey: "pochitalk_log_rec"); defaults.set(logBuffer, forKey: "pochitalk_diag_log") }
+            else { defaults.removeObject(forKey: "pochitalk_log_rec"); defaults.removeObject(forKey: "pochitalk_diag_log") }
+            pttNameAction?.sendString(shownName) // 名前が変わるので、相手にも知らせる
+            announce()
+            renderScan()
+            commit()
+        }
+    }
+
+    private var logBuffer: [String] = []
+
+    /// 一覧の名前から、つながっている相手の名前を (先頭 12 文字、個数で) 引いた残り。名前がまだ届いていない相手 (接続中...) の数だけは、残りから外す。
+    static func missingNames(listed: [String], connected: [String]) -> [String] {
+        var left = listed.map { String($0.prefix(12)) }
+        var unnamed = 0
+        for n in connected {
+            if n == "接続中..." { unnamed += 1; continue }
+            if let i = left.firstIndex(of: String(n.prefix(12))) { left.remove(at: i) }
+        }
+        return Array(left.dropFirst(min(unnamed, left.count)))
     }
 
     private func diag(_ line: String) {
+        if st.logRec {
+            RT.post { [self] in
+                logBuffer = Array((logBuffer + ["\(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .medium)) \(line)"]).suffix(300))
+                defaults.set(logBuffer, forKey: "pochitalk_diag_log")
+            }
+        }
         RT.log(line)
         let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         DispatchQueue.main.async { self.diagLines = Array((self.diagLines + ["\(t) \(line)"]).suffix(40)) }
@@ -261,17 +325,29 @@ final class PochiEngine: ObservableObject {
 
     private func int(_ v: Any?) -> Int { (v as? NSNumber)?.intValue ?? 0 }
 
+    #if DEBUG
+    /// 開発用: 一覧にだけいる人 (在室通知だけ来て、つながらない人) を作る。
+    func debugFakePresence(_ key: String, _ name: String) {
+        RT.post { [self] in
+            onPresence("fake-pubkey-\(name)", ["ch": key, "name": name, "talking": false])
+            diag("fake presence: lobby=\(lobbyEntries.count) missing=\(st.missingNames)")
+        }
+    }
+    #endif
+
     private func onPresence(_ pubkey: String, _ d: [String: Any]) {
-        let ch = (d["ch"] as? String) ?? ""
+        let ch = ((d["ch"] as? String) ?? "").lowercased()
         if ch.isEmpty {
             if lobbyEntries.removeValue(forKey: pubkey) != nil { renderScan() }
             return
         }
         guard isRoomKey(ch) else { return }
         let isNew = lobbyEntries[pubkey] == nil
+        let roomWasKnown = lobbyEntries.values.contains { $0.key == ch }
         lobbyEntries[pubkey] = LobbyEntry(
             key: ch, talking: (d["talking"] as? Bool) ?? false, name: String(((d["name"] as? String) ?? "?").prefix(12)),
             ts: RT.nowMs(), tag: capTag(d["tag"] as? String), tagBy: String(((d["by"] as? String) ?? "").prefix(12)), tagAt: int(d["at"]))
+        if !roomWasKnown { chimeNewRoom(ch) }
         if isNew {
             // 新しく来た人に、こちらの在室をすぐ知らせる (Web 版の announceSoon)
             RT.after(300 + Int.random(in: 0..<1200)) { [self] in announce() }
@@ -299,7 +375,7 @@ final class PochiEngine: ObservableObject {
         }
         presAnnounced = true
         presLastSent = RT.nowMs()
-        p.publish(["ch": key, "talking": isTransmitting, "name": myNickname, "tag": roomMeta.tag, "by": roomMeta.by, "at": roomMeta.at])
+        p.publish(["ch": key, "cn": room?.goodLinkCount() ?? 0, "ag": max(0, (RT.nowMs() - roomEnterTime) / 1000), "talking": isTransmitting, "name": shownName, "tag": roomMeta.tag, "by": roomMeta.by, "at": roomMeta.at])
     }
 
     private func renderScan() {
@@ -318,7 +394,7 @@ final class PochiEngine: ObservableObject {
         if let cur {
             var s = stats[cur] ?? Stat()
             s.count += 1
-            s.names.insert(myNickname + "(自分)", at: 0)
+            s.names.insert(shownName + "(自分)", at: 0)
             if isTransmitting { s.air = true }
             if roomMeta.at > s.tagAt { s.tagAt = roomMeta.at; s.tag = roomMeta.tag; s.tagBy = roomMeta.by }
             stats[cur] = s
@@ -330,7 +406,8 @@ final class PochiEngine: ObservableObject {
         st.totalPeople = stats.values.reduce(0) { $0 + $1.count }
         // ハッシュ順。ボットの部屋は先頭、招待された部屋はさらにその前 (Web 版と同じ)
         var order = stats.keys.sorted()
-        order = [botRoomKey] + order.filter { $0 != botRoomKey }
+        // 先頭は新しいおうむの部屋、次に旧いおうむの部屋 (人がいるときだけ。stats に載っているときだけ)
+        order = [botRoomKey] + (stats[botRoomOld] != nil ? [botRoomOld] : []) + order.filter { !isBotRoom($0) }
         if let pend { order = [pend] + order.filter { $0 != pend } }
         st.rooms = order.map { k in
             let s = stats[k]!
@@ -394,7 +471,9 @@ final class PochiEngine: ObservableObject {
         pttStateAction = stateAction; pttNameAction = nameAction; roomTagAction = tagAction
         startToneDecoding()
         // FAX: 中身はデータ便で届く (表示は、音のピーに合わせて1行ずつ)
-        r.action(Self.actionFaxPage).onMessage = { [self] msg, peerId in
+        let faxAction = r.action(Self.actionFaxPage)
+        faxPageAction = faxAction
+        faxAction.onMessage = { [self] msg, peerId in
             if msg.isJson { faxRx.onPage(peerId: peerId, json: msg.json()) }
         }
 
@@ -434,7 +513,7 @@ final class PochiEngine: ObservableObject {
             peers.append((peerId, PeerState(name: "接続中...", talking: false)))
             renderPeers()
             RT.after(3_000) { [self] in checkRoomFull() }
-            nameAction.sendString(myNickname, to: peerId)
+            nameAction.sendString(shownName, to: peerId)
             if roomMeta.at > 0 { tagAction.sendJson(metaJson(), to: peerId) } // 後から来た人にも、いまのタグを伝える
             let ageAtJoin = RT.nowMs() - roomEnterTime
             joinAgeAction.sendJson(["age": ageAtJoin], to: peerId)
@@ -463,7 +542,8 @@ final class PochiEngine: ObservableObject {
         if isTransmitting { pressed = false; stopTransmission() }
         room?.leave()
         room = nil
-        pttStateAction = nil; pttNameAction = nil; roomTagAction = nil
+        pttStateAction = nil; pttNameAction = nil; roomTagAction = nil; faxPageAction = nil
+        faxMode = false; faxText = ""; faxProbe = ""; st.faxCompose = nil
         stopToneDecoding()
         roomMeta = ("", "", 0)
         peers.removeAll()
@@ -557,9 +637,9 @@ final class PochiEngine: ObservableObject {
     /// 部屋の話題タグをつける/変える (誰でも変えられ、付けた人の名前が添えられる)。空にすると消える。
     func setTag(_ text: String) {
         RT.post { [self] in
-            guard let key = currentKey, key != botRoomKey else { return } // ボットの部屋は、タグを変えられない
+            guard let key = currentKey, !isBotRoom(key) else { return } // ボットの部屋は、タグを変えられない
             let t = capTag(text)
-            roomMeta = (t, t.isEmpty ? "" : myNickname, RT.nowMs())
+            roomMeta = (t, t.isEmpty ? "" : shownName, RT.nowMs())
             roomTagAction?.sendJson(metaJson())
             publishMeta()
         }
@@ -716,7 +796,7 @@ final class PochiEngine: ObservableObject {
     func commitNickname() {
         RT.post { [self] in
             persistNickname()
-            pttNameAction?.sendString(myNickname)
+            pttNameAction?.sendString(shownName)
             announce()
             renderScan()
         }
@@ -766,6 +846,213 @@ final class PochiEngine: ObservableObject {
 
     func pttRelease() { RT.post { [self] in pressed = false; stopTransmission() } }
 
+    // ================================================================ モールス送信 (Web 版 startMorse の移植)
+
+    private var morseQueue: [Character] = []
+    private var morsePlaying = false
+    private var morseSession = 0
+    private var morseJob: Job?
+
+    /// モールスのキーボードの1キー。「ESC」は、紙を隠して E S C を送る。「BS」は、送信待ちの最後を消す。
+    func morseKey(_ k: String) {
+        RT.post { [self] in
+            guard currentKey != nil, room != nil else { return }
+            if faxMode { faxKey(k); return }
+            // 「fax」と続けて打つと、隠しの FAX モードに入る (Web 版と同じ)
+            if k.count == 1 {
+                faxProbe = String((faxProbe + k.lowercased()).suffix(3))
+                if faxProbe == "fax" { faxProbe = ""; enterFaxMode(); return }
+            } else { faxProbe = "" }
+            if k == "ESC" {
+                faxRx.hide()
+                morseQueue.append(contentsOf: ["E", "S", "C"])
+            } else if k == "BS" {
+                if !morseQueue.isEmpty { morseQueue.removeLast() }
+            } else if let c = k.first, k.count == 1, morseCode[c] != nil {
+                morseQueue.append(c)
+            } else { return }
+            st.morseText = String(morseQueue)
+            commit()
+            startMorse()
+        }
+    }
+
+    // ================================================================ FAX 送信 (隠しモード。Web 版 startFaxTx の移植)
+
+    private var faxMode = false, faxText = "", faxProbe = ""
+    private var faxTxActive = false
+    private var faxSession = 0
+    private var faxJobs: [Job] = []
+    private var faxPaperTx = FaxPaper()
+    private var faxPageAction: TrysteroRoom.Action?
+
+    private func enterFaxMode() {
+        // 打ちかけのモールスは捨てる (送信中なら止める)
+        if isTransmitting { stopTransmission(quiet: true) } else { resetMorse() }
+        faxMode = true
+        faxText = ""
+        faxPaperTx = FaxPaper()
+        st.faxPaper = faxPaperTx
+        st.faxCompose = ""
+        st.morseText = ""
+        commit()
+    }
+
+    private func exitFaxMode() {
+        if faxTxActive { stopTransmission(quiet: true) }
+        faxMode = false; faxText = ""; faxProbe = ""
+        st.faxCompose = nil
+        flash("FAXモード終了")
+    }
+
+    /// FAX モード中のキー: 文字は書き足し、BS で消し、⏎ で送信、ESC で終了 (紙を隠して、モールスで「ESC」も送る)。
+    private func faxKey(_ k: String) {
+        if k == "ESC" {
+            exitFaxMode()
+            faxRx.hide()
+            st.faxPaper = nil
+            morseQueue.append(contentsOf: ["E", "S", "C"])
+            st.morseText = String(morseQueue)
+            commit()
+            startMorse()
+            return
+        }
+        if faxTxActive { return } // 送信中は、打てない
+        switch k {
+        case "ENTER": if !faxText.isEmpty { startFaxTx() }
+        case "BS": if !faxText.isEmpty { faxText.removeLast() }
+        default: if k.count == 1, faxText.count < 24 { faxText += k }
+        }
+        st.faxCompose = faxText
+        commit()
+    }
+
+    private func startFaxTx() {
+        guard !faxTxActive, !faxText.isEmpty, room != nil, !isTransmitting else { return }
+        if othersTalking() > 0 { sounds.playBusy(); flash("話中です"); return }
+        guard micGranted else { flash("マイクの許可が必要です"); requestMic(); return }
+        ensureMic()
+        let grid = FaxText.grid(faxText)
+        faxSession += 1
+        let session = faxSession
+        faxTxActive = true
+        isTransmitting = true
+        device.toneHz = 1500; device.toneAmp = 0.2; device.morseKey = false
+        device.morseMode = true
+        device.transmitting = true
+        diag("FAX送信開始 (\(grid.first?.count ?? 0)列)")
+        setStatus(.tx, "TX (FAX送信中)", ledTx: true, ledRx: st.ledRx)
+        pttStateAction?.sendJson(["isTalking": true])
+        announce()
+        renderScan()
+        faxPaperTx = FaxPaper()
+        st.faxPaper = faxPaperTx
+        commit()
+        faxPageAction?.sendJson(FaxText.payload(grid)) // 中身はデータ便でも先に送る (表示は音に合わせて後から)
+
+        // 時刻つきの動作の列に直して、順に予約する
+        var events: [(Int, () -> Void)] = []
+        var at = 500
+        func tone(_ hz: Double, _ ms: Int, _ also: (() -> Void)? = nil) {
+            events.append((at, { [self] in device.toneHz = hz; device.morseKey = true; also?() }))
+            at += ms
+        }
+        let F = (pre: 1500.0, sync: 900.0, white: 1300.0, black: 2100.0)
+        tone(F.pre, 700) // ピー (受信開始の合図): 受信側が確実に拾えるよう長めに
+        func row(_ cells: [Bool]?, _ y: Int) {
+            tone(F.sync, 150)
+            let cols = cells?.count ?? 0
+            guard let cells, cells.contains(true) else { tone(F.white, 80); return } // 空行は短く
+            var x = 0
+            while x < cols {
+                var x2 = x + 1
+                while x2 < cols && cells[x2] == cells[x] { x2 += 1 }
+                let black = cells[x], from = x, to = x2
+                tone(black ? F.black : F.white, (x2 - x) * Int(FaxReceiver.pxMs)) { [self] in
+                    if black { for px in from..<min(to, FaxPaper.cols) { faxPaperTx.pixels[y * FaxPaper.cols + px] = 1 } }
+                    st.faxPaper = faxPaperTx
+                    commit()
+                }
+                x = x2
+            }
+        }
+        row(nil, 0) // 先頭の空行 (余白)
+        for y in 0..<FaxReceiver.textRows { row(grid[y], 1 + y) }
+        at += 150
+        events.append((at, { [self] in stopTransmission(quiet: true) }))
+        faxJobs = events.map { (t, f) in
+            RT.after(t) { [self] in
+                guard session == faxSession, faxTxActive else { return }
+                f()
+            }
+        }
+    }
+
+    /// 送信を終えた・止めたとき、モールスの状態をすべて戻す (stopTransmission 系から呼ぶ)。
+    private func resetMorse() {
+        morseSession += 1
+        faxSession += 1; faxTxActive = false
+        faxJobs.forEach { $0.cancel() }; faxJobs = []
+        device.toneHz = 700; device.toneAmp = 0.35
+        morseJob?.cancel(); morseJob = nil
+        morseQueue.removeAll(); morsePlaying = false
+        device.morseMode = false; device.morseKey = false
+        st.morseText = ""
+    }
+
+    private func startMorse() {
+        if morsePlaying { return }
+        if room == nil || isTransmitting { morseQueue.removeAll(); st.morseText = ""; return }
+        if othersTalking() > 0 { sounds.playBusy(); flash("話中です"); morseQueue.removeAll(); st.morseText = ""; commit(); return }
+        guard micGranted else { morseQueue.removeAll(); st.morseText = ""; flash("マイクの許可が必要です"); requestMic(); return }
+        ensureMic()
+        morsePlaying = true
+        morseSession += 1
+        let session = morseSession
+        isTransmitting = true
+        device.morseKey = false
+        device.morseMode = true
+        device.transmitting = true
+        diag("モールス送信開始")
+        setStatus(.tx, "TX (モールス送信中)", ledTx: true, ledRx: st.ledRx)
+        pttStateAction?.sendJson(["isTalking": true])
+        announce()
+        renderScan()
+        // 打ち始める前の間 (受信側の復号リセットと回線の落ち着き待ち。最初の文字を拾わせるため長め)
+        morseJob = RT.after(700) { [self] in morseNext(session, first: true) }
+    }
+
+    private func morseNext(_ session: Int, first: Bool) {
+        guard session == morseSession else { return }
+        guard !morseQueue.isEmpty else {
+            morsePlaying = false
+            stopTransmission(quiet: true) // resetMorse も、ここで走る
+            return
+        }
+        let ch = morseQueue.removeFirst()
+        st.morseText = String(morseQueue); commit()
+        if ch == " " { morseJob = RT.after(600) { [self] in morseNext(session, first: first) }; return }
+        guard let pat = morseCode[ch] else { return morseNext(session, first: first) }
+        // (キーを押すか, ミリ秒) の列に直して、順に実行する
+        var steps: [(Bool, Int)] = []
+        let sym = Array(pat)
+        for (i, c) in sym.enumerated() {
+            steps.append((true, c == "." ? 100 : 300))
+            if i < sym.count - 1 { steps.append((false, first ? 150 : 100)) } // 先頭文字は隙間を広めに
+        }
+        steps.append((false, 100))
+        func run(_ i: Int) {
+            guard session == morseSession else { return }
+            if i == steps.count {
+                morseJob = RT.after(morseQueue.isEmpty ? 0 : 200) { [self] in morseNext(session, first: false) }
+                return
+            }
+            device.morseKey = steps[i].0
+            morseJob = RT.after(steps[i].1) { run(i + 1) }
+        }
+        run(0)
+    }
+
     private func othersTalking() -> Int { peers.filter { $0.state.talking }.count }
 
     private func startTransmission(quiet: Bool) {
@@ -797,6 +1084,7 @@ final class PochiEngine: ObservableObject {
         if !isTransmitting { return }
         isTransmitting = false
         device.transmitting = false
+        resetMorse()
         st.ledTx = false
         pttStateAction?.sendJson(["isTalking": false])
         announce()
@@ -808,6 +1096,7 @@ final class PochiEngine: ObservableObject {
         diag("送信終了")
         isTransmitting = false
         device.transmitting = false
+        resetMorse()
         if let id = currentTalkerId, let talker = peer(id) {
             onStartReceiving(talker.name)
         } else {

@@ -12,6 +12,9 @@ import androidx.core.content.ContextCompat
 import app.pochitalk.audio.MicGain
 import app.pochitalk.audio.MicMonitor
 import app.pochitalk.audio.RadioSounds
+import app.pochitalk.core.Fax
+import app.pochitalk.core.Morse
+import app.pochitalk.core.NostrProtocol
 import app.pochitalk.rtc.PresenceClient
 import app.pochitalk.rtc.RelayList
 import app.pochitalk.rtc.Runtime
@@ -53,7 +56,8 @@ object PochiEngine {
     // ---- Web版と共通のプロトコル定数。変えるとWeb版と通話できなくなる
     // 0.25.4 の通信形式は 0.20.0 と互換が無いので、識別名も新しくして、古い版とは別の世界にしている (Web版と同じ)
     const val APP_ID = "pochitalk-v2"
-    const val BOT_ROOM_KEY = "7a0b07c1" // おうむ返しボットの部屋 (タグは固定)
+    const val BOT_ROOM_KEY = "22360679" // おうむ返しボットの部屋 (表示 2236·0679。タグは固定)。入口は、この番号
+    const val BOT_ROOM_OLD = "7a0b07c1" // 旧い番号。古い版の人が来るので、しばらく残す
     const val MAX_ROOM = 8 // 1つの部屋は8人まで (Web版と同じ)
     private const val ACTION_PTT_STATE = "pttState"
     private const val ACTION_PTT_NAME = "pttName"
@@ -74,6 +78,11 @@ object PochiEngine {
     private const val PREF_PTT_POS = "pochitalk_ptt_pos"       // 話すボタンの位置。"left" / "right" のときだけ保存 (中央は標準)
     private const val PREF_LEFTY = "pochitalk_lefty"           // Web版と同じ: オンにしたときだけ "1" を保存
     private const val PREF_AUTO_RECONNECT = "pochitalk_auto_reconnect" // 自動で再接続する: オンにしたときだけ "1" を保存 (標準はオフ)
+    private const val PREF_NOTIFY_ROOM = "pochitalk_notify_room"
+    private const val PREF_LOG_MODE = "pochitalk_log_mode"
+    private const val PREF_CONSENT = "pochitalk_consent"
+    /** 利用上の注意の版。内容を変えたら日付を変えると、もう一度同意を求める。 */
+    const val CONSENT_VERSION = "2026-11-10"
     private const val PREF_WELCOME = "pochitalk_welcome"       // Web版と同じ: オフにしたときだけ "off" を保存
     private const val DEFAULT_VOX_STEP = 4
     private const val STREAM_ID = "pochitalk-audio"
@@ -132,6 +141,9 @@ object PochiEngine {
         val tag: String = "",
         val tagBy: String = "",
         val tagAt: Long = 0L,
+        /** 相手の「音声が通っている相手の数」と「入室してからの秒数」。無ければ -1 / 9999 (Web版と同じ)。 */
+        val cn: Int = -1,
+        val ag: Int = 9999,
     )
     private val lobbyEntries = HashMap<String, LobbyEntry>()
 
@@ -211,6 +223,8 @@ object PochiEngine {
         val savedGain = prefs.getInt(PREF_MIC_GAIN, 0).coerceIn(0, 30)
         micGain.gain = Math.pow(10.0, savedGain / 20.0).toFloat()
         _state.update { it.copy(micGainDb = savedGain, welcomeOn = prefs.getString(PREF_WELCOME, null) != "off", autoReconnect = prefs.getString(PREF_AUTO_RECONNECT, null) == "1") }
+        _state.update { it.copy(notifyRoom = prefs.getString(PREF_NOTIFY_ROOM, null) == "1", consentOk = prefs.getString(PREF_CONSENT, null) == CONSENT_VERSION) }
+        if (prefs.getString(PREF_LOG_MODE, null) == "1") { _state.update { it.copy(logMode = true) }; startLogFile() }
         val savedSfx = prefs.getInt(PREF_SFX_VOL, 100).coerceIn(0, 150)
         sounds.volume = savedSfx / 100f
         val savedPos = when (prefs.getString(PREF_PTT_POS, null)) {
@@ -329,6 +343,7 @@ object PochiEngine {
         }
         if (!isRoomKey(ch)) return
         val isNew = !lobbyEntries.containsKey(pubkey)
+        val firstOfRoom = lobbyEntries.values.none { it.key == ch }
         lobbyEntries[pubkey] = LobbyEntry(
             key = ch,
             talking = d.optBoolean("talking", false),
@@ -337,7 +352,10 @@ object PochiEngine {
             tag = capTag(d.optString("tag", "")),
             tagBy = d.optString("by", "").take(12),
             tagAt = d.optLong("at", 0L),
+            cn = d.optInt("cn", -1).let { if (it in 0..31) it else -1 },
+            ag = d.optInt("ag", 9999).let { if (it >= 0) it else 9999 },
         )
+        if (firstOfRoom) maybeNotifyNewRoom(ch)
         if (isNew) {
             // 新しく来た人に、こちらの在室をすぐ知らせる (Web版の announceSoon)
             Runtime.scope.launch {
@@ -346,6 +364,21 @@ object PochiEngine {
             }
         }
         renderScan()
+    }
+
+    private val roomNotified = HashMap<String, Long>()
+    private val startedAt = System.currentTimeMillis()
+
+    /** 新しい部屋ができたら、音だけで知らせる (Web版と同じ条件。同じ部屋は 10 分は鳴らさない)。 */
+    private fun maybeNotifyNewRoom(ch: String) {
+        if (!_state.value.notifyRoom || _state.value.sfxVolume <= 0) return
+        val now = System.currentTimeMillis()
+        if (now - startedAt < 12_000) return
+        if (ch == currentKey || isBotRoom(ch)) return
+        val last = roomNotified[ch]
+        if (last != null && now - last < 600_000) return
+        roomNotified[ch] = now
+        sounds.playNewRoom()
     }
 
     /**
@@ -392,8 +425,10 @@ object PochiEngine {
         presAnnounced = true
         presLastSent = System.currentTimeMillis()
         p.publish(
-            JSONObject().put("ch", key).put("talking", isTransmitting).put("name", myNickname)
-                .put("tag", roomMeta.tag).put("by", roomMeta.by).put("at", roomMeta.at),
+            JSONObject().put("ch", key).put("talking", isTransmitting).put("name", shownName())
+                .put("tag", roomMeta.tag).put("by", roomMeta.by).put("at", roomMeta.at)
+                .put("cn", room?.goodLinkCount() ?: 0)
+                .put("ag", ((System.currentTimeMillis() - roomEnterTime) / 1000).toInt().coerceAtLeast(0)),
         )
     }
 
@@ -424,7 +459,7 @@ object PochiEngine {
         if (cur != null) {
             val s = stats.getOrPut(cur) { Stat() }
             s.count++
-            s.names.add(0, myNickname + "(自分)")
+            s.names.add(0, shownName() + "(自分)")
             if (isTransmitting) s.air = true
             if (roomMeta.at > s.tagAt) {
                 s.tagAt = roomMeta.at
@@ -467,6 +502,14 @@ object PochiEngine {
 
     /** 起動直後や再接続の最中に押された入室。準備ができたら、そのまま入る (捨てない)。 */
     private var wantJoin: String? = null
+
+    /** 招待の「あとで」: 招待された部屋の扱いをやめて、ふつうの一覧に戻す。 */
+    fun dismissPending() {
+        Runtime.scope.launch {
+            pendingKey = null
+            renderScan()
+        }
+    }
 
     private fun joinInternal(key: String) {
         if (!isRoomKey(key)) return
@@ -521,6 +564,7 @@ object PochiEngine {
                 rx.onFaxPage(peerId, j.optInt("c", 0), j.optString("d", ""))
             }
         }
+        faxPageAction = faxAction
         pttStateAction = stateAction
         pttNameAction = nameAction
         roomTagAction = tagAction
@@ -564,7 +608,7 @@ object PochiEngine {
             if (msg.isJson) {
                 val d = msg.json()
                 val at = d.optLong("at", 0L)
-                if (at > roomMeta.at && currentKey != BOT_ROOM_KEY) { // ボットの部屋のタグは、ほかの人が送ってきても受け付けない
+                if (at > roomMeta.at && !isBotRoom(currentKey)) { // ボットの部屋のタグは、ほかの人が送ってきても受け付けない
                     roomMeta = Meta(capTag(d.optString("tag", "")), d.optString("by", "").take(12), at)
                     publishMeta()
                 }
@@ -577,7 +621,7 @@ object PochiEngine {
                 delay(3_000)
                 checkRoomFull()
             }
-            nameAction.sendString(myNickname, peerId)
+            nameAction.sendString(shownName(), peerId)
             if (roomMeta.at > 0) tagAction.sendJson(metaJson(), peerId) // 後から来た人にも、いまのタグを伝える
             val ageAtJoin = System.currentTimeMillis() - roomEnterTime
             joinAgeAction.sendJson(JSONObject().put("age", ageAtJoin), peerId)
@@ -612,6 +656,8 @@ object PochiEngine {
 
     private fun leaveInternal(keepService: Boolean) {
         if (room == null && currentKey == null) return
+        abortMorseInternal()
+        _state.update { if (it.faxMode) it.copy(faxMode = false, faxText = "") else it }
         if (isTransmitting) {
             pressed = false
             stopTransmission()
@@ -731,7 +777,7 @@ object PochiEngine {
     /** 部屋の話題タグをつける/変える (誰でも変えられ、付けた人の名前が添えられる)。空にすると消える。 */
     fun setTag(text: String) {
         Runtime.scope.launch {
-            if (currentKey == null || currentKey == BOT_ROOM_KEY) return@launch // おうむ返しの部屋のタグは固定
+            if (currentKey == null || isBotRoom(currentKey)) return@launch // おうむ返しの部屋のタグは固定
             val t = capTag(text)
             roomMeta = Meta(t, if (t.isNotEmpty()) myNickname else "", System.currentTimeMillis())
             roomTagAction?.sendJson(metaJson())
@@ -865,7 +911,7 @@ object PochiEngine {
     fun commitNickname() {
         Runtime.scope.launch {
             persistNickname()
-            pttNameAction?.sendString(myNickname)
+            pttNameAction?.sendString(shownName())
             announce()
             renderScan()
         }
@@ -1055,7 +1101,205 @@ object PochiEngine {
         renderScan()
     }
 
+    // ---------------------------------------------------------------- モールス送信 (Web版の startMorse)
+
+    private var faxPageAction: TrysteroRoom.Action? = null
+    private var faxProbe = ""
+    private val morseQueue = java.util.ArrayDeque<Char>()
+    private var morseJob: Job? = null
+
+    private fun publishMorse() {
+        val q = morseQueue.joinToString("").trim()
+        _state.update { if (it.morseQueued == q && it.morseSending == (morseJob != null)) it else it.copy(morseQueued = q, morseSending = morseJob != null) }
+    }
+
+    /** 文字列をモールスで送る (英数字と記号。ほかは読み飛ばす)。送信中なら待ち行列に足す。 */
+    fun sendMorse(text: String) {
+        Runtime.scope.launch {
+            for (c in text.uppercase()) if (c == ' ' || Morse.CODE.containsKey(c)) morseQueue.add(c)
+            publishMorse()
+            if (morseJob == null) startMorse()
+        }
+    }
+
+    /**
+     * 専用キーボードのキー (Web版のモールスのキーボードと同じ)。1 文字 / "ESC" / "BS" / "ENTER"。
+     * FAXモードでは、文字は FAX に載せる文字になる。「fax」と続けて打つと FAXモードに入る。
+     */
+    fun morseKey(k: String) {
+        Runtime.scope.launch {
+            if (room == null) return@launch
+            val st = _state.value
+            if (k == "ESC") {
+                if (st.faxMode) exitFaxMode()
+                _state.update { it.copy(fax = null) } // 紙も隠す
+                for (c in "ESC") morseQueue.add(c)
+                publishMorse()
+                if (morseJob == null) startMorse()
+                return@launch
+            }
+            if (st.faxMode) {
+                if (morseJob != null) return@launch // 送信中は受け付けない
+                when {
+                    k == "BS" -> _state.update { it.copy(faxText = it.faxText.dropLast(1)) }
+                    k == "ENTER" -> if (st.faxText.isNotEmpty()) startFax(st.faxText)
+                    k.length == 1 && st.faxText.length < 24 -> _state.update { it.copy(faxText = it.faxText + k) }
+                }
+                return@launch
+            }
+            if (k == "BS") { morseQueue.pollLast(); publishMorse(); return@launch }
+            val c = k.singleOrNull()?.uppercaseChar() ?: return@launch
+            if (!Morse.CODE.containsKey(c)) return@launch
+            faxProbe = (faxProbe + c.lowercaseChar()).takeLast(3)
+            if (faxProbe == "fax") {
+                // 「f」「a」がまだ送られていなければ、取り消してから FAXモードに入る
+                if (morseQueue.size >= 2) { val a = morseQueue.pollLast(); val f = morseQueue.pollLast(); if (a != 'A' || f != 'F') { if (f != null) morseQueue.add(f); if (a != null) morseQueue.add(a) } }
+                enterFaxMode()
+                return@launch
+            }
+            morseQueue.add(c)
+            publishMorse()
+            if (morseJob == null) startMorse()
+        }
+    }
+
+    private fun enterFaxMode() {
+        abortMorseInternal()
+        faxProbe = ""
+        _state.update { it.copy(faxMode = true, faxText = "", fax = FaxPaper(Fax.MAX_COLS, BooleanArray(Fax.ROWS * Fax.MAX_COLS), Fax.ROWS, "")) }
+    }
+
+    private fun exitFaxMode() {
+        abortMorseInternal()
+        _state.update { it.copy(faxMode = false, faxText = "") }
+        flash("FAXモード終了")
+    }
+
+    /** 文字を FAX で送る (Web版の startFaxTx): 絵のデータを送り、同じ絵を音 (900/1300/1500/2100Hz) でも送る。 */
+    private fun startFax(text: String) {
+        if (room == null || isTransmitting) return
+        if (othersTalking() > 0) { sounds.playBusy(); return flash("話中です") }
+        if (!micGranted()) { flash("マイクの許可が必要です"); _events.tryEmit(UiEvent.RequestMic); return }
+        ensureMic()
+        val track = audioTrack ?: return flash("マイクを準備できませんでした")
+        val grid = try { FaxText.toGrid(text) } catch (_: Throwable) { return flash("FAX化に失敗しました") }
+        val cols = grid[0].size
+        isTransmitting = true
+        micMonitor.stopAndWait()
+        track.setEnabled(true)
+        micGain.keyDown = false
+        micGain.tonePeak = 0.2f
+        micGain.toneFreq = 1300.0
+        micGain.morseMode = true
+        setMicMuted(false)
+        setStatus(StatusKind.TX, "TX (FAX送信中)", ledTx = true, ledRx = _state.value.ledRx)
+        pttStateAction?.sendJson(JSONObject().put("isTalking", true))
+        announce()
+        renderScan()
+        val black = BooleanArray(Fax.ROWS * cols)
+        val mine = myNickname
+        _state.update { it.copy(fax = FaxPaper(cols, black.copyOf(), Fax.ROWS, mine)) }
+        val (c, d) = Fax.gridToPayload(grid)
+        faxPageAction?.sendJson(JSONObject().put("c", c).put("d", d)) // 中身はデータ便でも先に送る (表示は音に合わせて後から)
+        val job = Runtime.scope.launch {
+            delay(500)
+            micGain.keyDown = true
+            micGain.toneFreq = 1500.0 // ピー (受信開始の合図)
+            delay(700)
+            suspend fun row(rowArr: BooleanArray?, yAbs: Int) {
+                micGain.toneFreq = 900.0 // 同期
+                delay(150)
+                if (rowArr == null || rowArr.none { it }) { micGain.toneFreq = 1300.0; delay(80); return } // 空行は短く
+                var x = 0
+                while (x < cols) {
+                    var x2 = x + 1
+                    while (x2 < cols && rowArr[x2] == rowArr[x]) x2++
+                    micGain.toneFreq = if (rowArr[x]) 2100.0 else 1300.0
+                    delay((x2 - x) * Fax.PX_MS.toLong())
+                    for (px in x until x2) black[yAbs * cols + px] = rowArr[px]
+                    _state.update { it.copy(fax = FaxPaper(cols, black.copyOf(), Fax.ROWS, mine)) }
+                    x = x2
+                }
+            }
+            row(null, 0)
+            for (y in 0 until Fax.TEXT_ROWS) row(grid[y], 1 + y)
+            delay(150)
+            morseJob = null
+            micGain.keyDown = false
+            micGain.morseMode = false
+            if (isTransmitting) stopTransmission(quiet = true)
+            publishMorse()
+        }
+        morseJob = job
+        publishMorse()
+    }
+
+    fun abortMorse() {
+        Runtime.scope.launch { abortMorseInternal() }
+    }
+
+    private fun abortMorseInternal() {
+        morseQueue.clear()
+        val j = morseJob
+        morseJob = null
+        j?.cancel()
+        micGain.keyDown = false
+        if (micGain.morseMode) {
+            micGain.morseMode = false
+            if (isTransmitting) stopTransmission(quiet = true)
+        }
+        publishMorse()
+    }
+
+    private fun startMorse() {
+        if (room == null) { morseQueue.clear(); publishMorse(); return flash("先に部屋に入ってください") }
+        if (isTransmitting) { morseQueue.clear(); publishMorse(); return }
+        if (othersTalking() > 0) { morseQueue.clear(); publishMorse(); sounds.playBusy(); return flash("話中です") }
+        if (!micGranted()) { morseQueue.clear(); publishMorse(); flash("マイクの許可が必要です"); _events.tryEmit(UiEvent.RequestMic); return }
+        ensureMic()
+        val track = audioTrack ?: run { morseQueue.clear(); publishMorse(); return flash("マイクを準備できませんでした") }
+        isTransmitting = true
+        micMonitor.stopAndWait()
+        track.setEnabled(true)
+        micGain.keyDown = false
+        micGain.toneFreq = 700.0
+        micGain.tonePeak = 0.35f
+        micGain.morseMode = true // マイクの音は捨てて、モールスの音を入れる
+        setMicMuted(false)
+        setStatus(StatusKind.TX, "TX (モールス送信中)", ledTx = true, ledRx = _state.value.ledRx)
+        pttStateAction?.sendJson(JSONObject().put("isTalking", true))
+        announce()
+        renderScan()
+        val job = Runtime.scope.launch {
+            delay(700) // 打ち始める前の間 (受信側の復号リセットと回線の落ち着き待ち)
+            var first = true
+            while (morseQueue.isNotEmpty()) {
+                val ch = morseQueue.poll()!!
+                publishMorse()
+                if (ch == ' ') { delay((Morse.UNIT_MS * 6).toLong()); continue }
+                val pat = Morse.CODE[ch] ?: continue
+                for (i in pat.indices) {
+                    micGain.keyDown = true
+                    delay(if (pat[i] == '.') Morse.UNIT_MS.toLong() else (Morse.UNIT_MS * 3).toLong())
+                    micGain.keyDown = false
+                    if (i < pat.length - 1) delay((Morse.UNIT_MS * (if (first) 1.5 else 1.0)).toLong()) // 先頭文字は隙間を広めに
+                }
+                delay(Morse.UNIT_MS.toLong())
+                first = false
+                if (morseQueue.isNotEmpty()) delay((Morse.UNIT_MS * 2).toLong())
+            }
+            delay(150) // 最後の音の余韻 (リリース) を送り切る
+            morseJob = null
+            micGain.morseMode = false
+            if (isTransmitting) stopTransmission(quiet = true)
+            publishMorse()
+        }
+        morseJob = job
+        publishMorse()
+    }
+
     private fun stopTransmissionSilently() {
+        if (morseJob != null || micGain.morseMode) { morseQueue.clear(); morseJob?.cancel(); morseJob = null; micGain.keyDown = false; micGain.morseMode = false; publishMorse() }
         if (!isTransmitting) return
         isTransmitting = false
         txEndedAt = System.currentTimeMillis()
@@ -1153,7 +1397,7 @@ object PochiEngine {
     private fun updateCounts() {
         val cur = currentKey
         if (cur == null || room == null) {
-            _state.update { if (it.connectedCount == 0 && it.presentCount == 0) it else it.copy(connectedCount = 0, presentCount = 0) }
+            _state.update { if (it.connectedCount == 0 && it.presentCount == 0 && !it.rejoinTurn && it.missingNames.isEmpty()) it else it.copy(connectedCount = 0, presentCount = 0, audioOkCount = 0, rejoinTurn = false, missingNames = emptyList()) }
             return
         }
         // Web版の updatePeerCount と同じ: 一覧 (Nostr) で見える人と、実際につながっている人を、名前でまとめて数える。
@@ -1165,7 +1409,33 @@ object PochiEngine {
         peers.forEach { (id, p) -> names.add((p.name.ifEmpty { id.take(5) }).take(12)) }
         inLobby.forEach { names.add(it.name.take(12)) }
         val m = maxOf(names.size, inLobby.size + 1, n)
-        _state.update { if (it.connectedCount == n && it.presentCount == m) it else it.copy(connectedCount = n, presentCount = m) }
+        val good = (room?.goodLinkCount() ?: 0) + 1
+        val rejoin = weakestIsMe(cur, good - 1)
+        // 一覧にはいるのに、まだ音声がつながっていない人 (Web版の renderMissing): 一覧の名前から、つながっている相手の名前を、個数で突き合わせて引く
+        val pool = peers.map { (id, p) -> (p.name.ifEmpty { id.take(5) }).take(12) }.toMutableList()
+        val missing = ArrayList<String>()
+        for (e in inLobby) {
+            val nm = e.name.take(12)
+            if (!pool.remove(nm)) missing.add(nm)
+        }
+        _state.update {
+            if (it.connectedCount == n && it.presentCount == m && it.audioOkCount == good && it.rejoinTurn == rejoin && it.missingNames == missing) it
+            else it.copy(connectedCount = n, presentCount = m, audioOkCount = good, rejoinTurn = rejoin, missingNames = missing)
+        }
+    }
+
+    /**
+     * つながりの順位 (Web版の linkRanking): 各端末が在室通知で共有する cn (音声が通っている人数) の少ない順に並べ、
+     * 先頭 (入室45秒以上) が自分なら「入り直す番」。全員とつながっている端末が最下位なら不要。
+     */
+    private fun weakestIsMe(cur: String, myCn: Int): Boolean {
+        class Row(val cn: Int, val ag: Int, val me: Boolean, val key: String)
+        val rows = ArrayList<Row>()
+        rows.add(Row(myCn, ((System.currentTimeMillis() - roomEnterTime) / 1000).toInt(), true, NostrProtocol.publicKeyHex.ifEmpty { "zz" }))
+        for ((k, v) in lobbyEntries) if (v.key == cur) rows.add(Row(v.cn, v.ag, false, k))
+        val known = rows.filter { it.cn >= 0 }.sortedWith(compareBy<Row> { it.cn }.thenBy { it.key })
+        val mature = known.filter { it.ag >= 45 }
+        return known.size >= 2 && mature.isNotEmpty() && mature[0].cn < rows.size - 1 && mature[0].me
     }
 
     /** 自動で再接続するか (標準はオフ)。オフでも、手動の「再接続」とマイクの取り直しは今までどおり。 */
@@ -1192,6 +1462,58 @@ object PochiEngine {
         _state.update { it.copy(micGainDb = v) }
         prefs.edit().putInt(PREF_MIC_GAIN, v).apply()
     }
+
+    // ---------------------------------------------------------------- 設定: 新しい部屋の音 / 通信の記録 / 同意
+
+    fun setNotifyRoom(on: Boolean) {
+        _state.update { it.copy(notifyRoom = on) }
+        if (on) prefs.edit().putString(PREF_NOTIFY_ROOM, "1").apply() else prefs.edit().remove(PREF_NOTIFY_ROOM).apply()
+        if (on) Runtime.scope.launch { sounds.playNewRoom() } // オンにした瞬間に、確かめとして1回鳴らす
+    }
+
+    /** 利用上の注意に同意した (版の日付を保存する)。 */
+    fun acceptConsent() {
+        prefs.edit().putString(PREF_CONSENT, CONSENT_VERSION).apply()
+        _state.update { it.copy(consentOk = true) }
+    }
+
+    private val logExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private fun logFile() = java.io.File(app.filesDir, "pochi-log.txt")
+
+    /** 通信の記録を端末に残す。最大 300 行。外部へは送らない。 */
+    private fun startLogFile() {
+        Runtime.logSink = { msg ->
+            logExecutor.execute {
+                runCatching {
+                    val f = logFile()
+                    f.appendText(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + msg + "\n")
+                    val lines = f.readLines()
+                    if (lines.size > 400) f.writeText(lines.takeLast(300).joinToString("\n") + "\n")
+                }
+            }
+        }
+    }
+
+    fun setLogMode(on: Boolean) {
+        _state.update { it.copy(logMode = on) }
+        if (on) {
+            prefs.edit().putString(PREF_LOG_MODE, "1").apply()
+            startLogFile()
+        } else {
+            prefs.edit().remove(PREF_LOG_MODE).apply()
+            Runtime.logSink = null
+            logExecutor.execute { runCatching { logFile().delete() } } // オフにしたら消す
+        }
+        // 名前の前の 💾 を、同じ部屋の人にも見せる
+        Runtime.scope.launch {
+            pttNameAction?.sendString(shownName())
+            announce()
+            renderScan()
+        }
+    }
+
+    /** 相手に見せる名前 (記録モードの間は、前に 💾)。 */
+    private fun shownName() = ((if (_state.value.logMode) "💾" else "") + myNickname).take(12)
 
     /** 初回案内を表示するか。Web版と同じく、オフにしたときだけ "off" を保存する。 */
     fun setWelcomeOn(on: Boolean) {
