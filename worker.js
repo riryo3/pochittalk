@@ -269,12 +269,12 @@ const HTML = `<!DOCTYPE html>
     .rdial { position: relative; z-index: 1; height: 100%; overflow-y: auto; padding: var(--rdial-row) 0; box-sizing: border-box; scroll-snap-type: y mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; outline: none; }
     .rdial::-webkit-scrollbar { display: none; }
     .rdial:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-color); border-radius: 14px; }
-    .rdial-item { height: var(--rdial-row); box-sizing: border-box; padding: 9px 16px 0; scroll-snap-align: center; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: flex-start; gap: 1px; cursor: pointer; color: var(--text-color); border-left: 3px solid transparent; will-change: transform, opacity; user-select: none; -webkit-user-select: none; }
+    .rdial-item { height: var(--rdial-row); box-sizing: border-box; padding: 33px 16px 0; scroll-snap-align: center; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: flex-start; gap: 1px; cursor: pointer; color: var(--text-color); border-left: 3px solid transparent; will-change: transform, opacity; user-select: none; -webkit-user-select: none; }
     .rdial-item { position: relative; transform-origin: 50% 50%; background: none; }
     /* ドラム本体は動かない（背景は固定）。部屋の文字だけが、ドラムの面に印刷されて、回る */
     .rdial-wrap::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--rdial-row); transform: translateY(-50%); pointer-events: none; z-index: 0; background: linear-gradient(180deg, rgba(148,163,184,0) 0%, rgba(148,163,184,0.07) 50%, rgba(148,163,184,0) 100%); }
     .rdial-item > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-    /* 赤い線は、1行目（部屋の番号）と、2行目（タグや名前）の、すきまを通る */
+    /* 赤い線は、1行目（部屋の番号）と、2行目（タグや名前）の、すきまを通る（1行の高さ132pxの中央＝66px。番号の高さ26px、すきま13pxのまん中が66pxになるよう、上の余白は33px） */
     .rdial-item > div:nth-child(2) { margin-top: 12px; }
     .rdial-item .chip-tag, .rdial-item .chip-who { margin-top: 0; max-width: 100%; font-size: 0.74rem; }
     /* 在室の人は、全員の名前を出す（長くなったら、「、」の後で折り返す。省略しない） */
@@ -293,7 +293,7 @@ const HTML = `<!DOCTYPE html>
     .rdial-item.air { border-left-color: var(--tx-color); }
     .rdial-item.full { filter: grayscale(0.7); }
     .rdial-empty { height: var(--rdial-row); display: flex; align-items: center; justify-content: center; color: var(--muted-color); font-size: 0.82rem; text-align: center; padding: 0 16px; scroll-snap-align: center; }
-    .rdial-line { position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; transform: translateY(-1px); background: #ef4444; box-shadow: 0 0 8px #ef4444; pointer-events: none; border-radius: 1px; z-index: 0; }
+    .rdial-line { position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; transform: translateY(-1px); background: #ef4444; box-shadow: 0 0 8px #ef4444; pointer-events: none; border-radius: 1px; z-index: 2; } /* 赤い線は、部屋の文字（絵文字の 💾 を含む）より手前に出す */
     .rdial-line::before, .rdial-line::after { content: ''; position: absolute; top: -4px; border: 5px solid transparent; }
     .rdial-line::before { left: -2px; border-left-color: #ef4444; }
     .rdial-line::after { right: -2px; border-right-color: #ef4444; }
@@ -4249,7 +4249,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q39（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
+const APP_VERSION = '2026-11-10-z12q41（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため

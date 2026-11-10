@@ -67,15 +67,15 @@ private struct DialRow: View {
         HStack(spacing: 0) {
             edge.frame(width: 3)
             VStack(alignment: .leading, spacing: 0) {
-                Text(head).font(.system(size: 14, design: .monospaced)).foregroundStyle(PC.text).lineLimit(1)
-                Spacer().frame(height: 8)
+                Text(head).font(.system(size: 14, design: .monospaced)).foregroundStyle(PC.text).lineLimit(1).frame(height: 26, alignment: .leading)
+                Spacer().frame(height: 13)
                 if !room.tag.isEmpty {
                     Text("🏷 " + room.tag + (room.tagBy.isEmpty ? "" : "（\(room.tagBy)）")).font(.system(size: 12)).foregroundStyle(Color(hex: 0x93C5FD)).lineLimit(1)
                 }
                 Text(who).font(.system(size: 12)).foregroundStyle(PC.muted).fixedSize(horizontal: false, vertical: true) // 全員の名前を省略せず、折り返して出す
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 13).padding(.trailing, 16).padding(.top, 9)
+            .padding(.leading, 13).padding(.trailing, 16).padding(.top, 33)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
@@ -110,7 +110,6 @@ struct RoomDial: View {
 
     var body: some View {
         ZStack {
-            redLine // 文字の後ろ (Web 版と同じ)
             if rooms.isEmpty {
                 Text(emptyText).font(.system(size: 13)).foregroundStyle(PC.muted).padding(.horizontal, 16).multilineTextAlignment(.center)
             } else {
@@ -118,6 +117,7 @@ struct RoomDial: View {
                     .allowsHitTesting(false) // 行の当たり判定は、見た目と合わない。タップは、下の handleTap で位置から決める
             }
             rails
+            redLine // すべての行 (文字・絵文字) より手前
             // 上下の暗がり
             VStack(spacing: 0) {
                 LinearGradient(colors: [Color(hex: 0x0F1419), .clear], startPoint: .top, endPoint: .bottom).frame(height: rowH * 3 * 0.22)
