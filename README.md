@@ -49,6 +49,6 @@
 
 ## 謝辞とライセンス
 
-- 元になった作品は、qramo さんの [po_call](https://github.com/qramo/po_call) です（MIT ライセンス）。ありがとうございます
+- 元になった作品は、qramo さんの「[ぽっと通話](https://potalk.app/)」（ソースコードは [po_call](https://github.com/qramo/po_call)、MIT ライセンス）です。ありがとうございます
 - 接続の仲介は、[Trystero](https://github.com/dmotz/trystero)（MIT ライセンス、© Dan Motzenbecker）です
 - 著作: © qramo, © リョータ（MIT ライセンス。リポジトリ直下の `LICENSE`）
