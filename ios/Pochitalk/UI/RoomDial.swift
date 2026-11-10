@@ -1,7 +1,7 @@
 import SwiftUI
 
-private let rowH: CGFloat = 84
-private let stepDeg: Double = 52 // 1行あたりの回転角
+private let rowH: CGFloat = 132
+private let stepDeg: Double = 36 // 1行あたりの回転角
 
 /// 回転量 `center` (行数。先頭の部屋が真ん中に来ているときが 0) を、アニメーションの途中でもなめらかに補間する描画部分。
 /// 部屋は円柱の表面に並び、中央の1行が真正面を向く (Web 版の .rdial / Android 版 RoomDial.kt と同じモデル)。
@@ -44,7 +44,7 @@ private struct DialBody: View, Animatable {
                     .frame(height: rowH)
                     .scaleEffect(y: CGFloat(max(0.04, c)))
                     .offset(y: CGFloat(radius * sin(rad)))
-                    .opacity(abs(off) > 1.85 ? 0 : max(0.1, pow(c, 1.4)))
+                    .opacity(abs(off) > 2.6 ? 0 : max(0.12, pow(c, 1.1)))
             }
         }
     }
@@ -58,29 +58,29 @@ private struct DialRow: View {
 
     var body: some View {
         let full = room.count >= PochiEngine.maxRoom && !room.isCurrent
-        let edge: Color = room.air ? PC.tx : pending ? PC.amber : room.key == botRoomKey ? PC.botGreen : .clear
+        let edge: Color = room.air ? PC.tx : pending ? PC.amber : isBotRoom(room.key) ? PC.botGreen : .clear
         let bg: Color = room.isCurrent ? Color(hex: 0x172554, alpha: 0.55) : onLine ? Color(hex: 0x3B82F6, alpha: 0.10) : .clear
-        let head = (room.key == botRoomKey ? "🦜 " : "") + (room.air ? "🔴 " : "🔵 ") + formatKey(room.key) + " · 👤\(room.count)"
+        let head = (isBotRoom(room.key) ? "🦜 " : "") + (room.air ? "🔴 " : "🔵 ") + formatKey(room.key) + " · 👤\(room.count)"
             + (room.isCurrent && room.count != connected ? "（つながっているのは \(connected) 人）" : "")
             + (room.count >= PochiEngine.maxRoom ? " · 満員" : "") + (pending ? " · 招待" : "")
         let who = room.invited ? "招待された部屋（現在は無人）" : (room.count == 0 && room.names.isEmpty ? "この部屋には、いま誰もいません" : room.names.joined(separator: "、"))
         HStack(spacing: 0) {
             edge.frame(width: 3)
             VStack(alignment: .leading, spacing: 0) {
-                Text(head).font(.system(size: 14, design: .monospaced)).foregroundStyle(PC.text).lineLimit(1)
-                Spacer().frame(height: 19)
+                Text(head).font(.system(size: 14, design: .monospaced)).foregroundStyle(PC.text).lineLimit(1).frame(height: 26, alignment: .leading)
+                Spacer().frame(height: 13)
                 if !room.tag.isEmpty {
                     Text("🏷 " + room.tag + (room.tagBy.isEmpty ? "" : "（\(room.tagBy)）")).font(.system(size: 12)).foregroundStyle(Color(hex: 0x93C5FD)).lineLimit(1)
                 }
-                Text(who).font(.system(size: 12)).foregroundStyle(PC.muted).lineLimit(1)
+                Text(who).font(.system(size: 12)).foregroundStyle(PC.muted).fixedSize(horizontal: false, vertical: true) // 全員の名前を省略せず、折り返して出す
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 13).padding(.trailing, 16).padding(.top, 9)
+            .padding(.leading, 13).padding(.trailing, 16).padding(.top, 33)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
         .background(bg)
-        .opacity(full ? 0.6 : 1)
+        .grayscale(full ? 0.7 : 0) // 満員の部屋は、白黒に近く
     }
 }
 
@@ -92,6 +92,10 @@ struct RoomDial: View {
     let pendingKey: String?
     let emptyText: String
     let onJoin: (String) -> Void
+    /// 赤い線に合っている部屋が変わったとき (なければ nil)。
+    var onFocus: ((String?) -> Void)?
+    /// 横に長く動かされたとき (縦のダイヤル操作ではなかったとき) の、横の移動量。ドロワーを閉じるスワイプに使う。
+    var onSideSwipe: ((CGFloat) -> Void)?
 
     @State private var center: Double = 0
     @State private var dragBase: Double?
@@ -101,6 +105,8 @@ struct RoomDial: View {
     @State private var lastCurrent: String?
 
     private var keys: [String] { rooms.map(\.key) }
+    private var focusIndex: Int { rooms.isEmpty ? -1 : Int(center.rounded()).clamped(0, rooms.count - 1) }
+    private func reportFocus() { onFocus?(focusIndex >= 0 ? rooms[focusIndex].key : nil) }
 
     var body: some View {
         ZStack {
@@ -110,13 +116,13 @@ struct RoomDial: View {
                 DialBody(center: center, rooms: rooms, connected: connected, pendingKey: pendingKey)
                     .allowsHitTesting(false) // 行の当たり判定は、見た目と合わない。タップは、下の handleTap で位置から決める
             }
-            redLine
             rails
+            redLine // すべての行 (文字・絵文字) より手前
             // 上下の暗がり
             VStack(spacing: 0) {
-                LinearGradient(colors: [Color(hex: 0x0F1419), .clear], startPoint: .top, endPoint: .bottom).frame(height: rowH * 3 * 0.34)
+                LinearGradient(colors: [Color(hex: 0x0F1419), .clear], startPoint: .top, endPoint: .bottom).frame(height: rowH * 3 * 0.22)
                 Spacer()
-                LinearGradient(colors: [.clear, Color(hex: 0x0F1419)], startPoint: .top, endPoint: .bottom).frame(height: rowH * 3 * 0.34)
+                LinearGradient(colors: [.clear, Color(hex: 0x0F1419)], startPoint: .top, endPoint: .bottom).frame(height: rowH * 3 * 0.22)
             }.allowsHitTesting(false)
         }
         .frame(height: rowH * 3)
@@ -133,6 +139,7 @@ struct RoomDial: View {
                 .updating($dragging) { _, state, _ in state = true }
                 .onChanged { v in
                     if dragBase == nil { dragBase = center }
+                    if abs(v.translation.width) > 16 && abs(v.translation.width) > abs(v.translation.height) * 2 { return } // 横のスワイプ: ダイヤルは回さない
                     if abs(v.translation.height) >= 10 { userMoved = true }
                     let n = Double(max(0, rooms.count - 1))
                     center = min(n + 0.3, max(-0.3, (dragBase ?? 0) - Double(v.translation.height / rowH)))
@@ -140,6 +147,11 @@ struct RoomDial: View {
                 .onEnded { v in
                     let base = dragBase ?? center
                     dragBase = nil
+                    if abs(v.translation.width) > 16 && abs(v.translation.width) > abs(v.translation.height) * 2 {
+                        center = base; snap(to: Int(base.rounded()), user: false)
+                        onSideSwipe?(v.translation.width)
+                        return
+                    }
                     // 指のぶれ程度 (合計10pt未満) は、タップとして扱う: 元の位置へ戻して、押した場所の行を選ぶ
                     if abs(v.translation.height) < 10 && abs(v.translation.width) < 10 {
                         center = base
@@ -160,8 +172,9 @@ struct RoomDial: View {
                 snap(to: Int(center.rounded()), user: true)
             }
         }
-        .onAppear { settle(animated: false) }
-        .onChange(of: rooms) { _ in settle(animated: false) } // 一覧の中身 (いまいる部屋の印など) が変わったとき
+        .onAppear { settle(animated: false); reportFocus() }
+        .onChange(of: focusIndex) { _ in reportFocus() }
+        .onChange(of: rooms) { _ in settle(animated: false); reportFocus() } // 一覧の中身 (いまいる部屋の印など) が変わったとき
         .onChange(of: rooms.first(where: \.isCurrent)?.key) { cur in
             // 入室した (いる部屋が変わった) 瞬間に、その部屋が赤い線まで回る
             guard let cur, cur != lastCurrent else { lastCurrent = cur; return }
@@ -180,7 +193,7 @@ struct RoomDial: View {
         var bestOff = Double.infinity
         for i in rooms.indices {
             let off = Double(i) - center
-            if abs(off) > 1.85 { continue }
+            if abs(off) > 2.6 { continue }
             let rad = max(-88, min(88, off * stepDeg)) * .pi / 180
             let mid = Double(rowH) * 3 / 2 + radius * sin(rad)
             let half = Double(rowH) / 2 * max(0.04, cos(rad))

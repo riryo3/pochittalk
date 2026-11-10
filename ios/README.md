@@ -3,7 +3,7 @@
 ボタンを押している間だけ話せる、トランシーバー風のグループ通話アプリの iPhone ネイティブ版（α）。
 Web 版・Android 版と**同じ部屋で相互に通話**できます。ロック画面・バックグラウンドでも **VOX（声で自動送信）** が使えるように作っています（※実機での確認はこれから。下の「検証状況」を読んでください）。
 
-- アプリ名: ぽちっと通話 / バンドル ID: `app.pochitalk.ios`（仮）/ 対応: iOS 16 以上、iPhone のみ・縦向き
+- アプリ名: ぽちっと通話 / バンドル ID: `app.pochitalk.ios`（仮）/ 対応: iOS 16 以上、iPhone（縦向き）と iPad（広い画面では 2 列）
 - 元になった作品: qramo さんの「ぽっと通話」（[potalk.app](https://potalk.app/) / [github.com/qramo/po_call](https://github.com/qramo/po_call)、MIT）
 - 著作: © qramo, © リョータ（MIT ライセンス。リポジトリ直下の `LICENSE`）
 

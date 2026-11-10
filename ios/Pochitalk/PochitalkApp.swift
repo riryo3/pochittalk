@@ -17,6 +17,12 @@ struct PochitalkApp: App {
                     if PochiEngine.shared.ui.currentKey != args[i + 1] { PochiEngine.shared.join(args[i + 1]) }
                 }
             }
+            // 開発用: 一覧にだけいる (つながらない) 人を作る。赤いチップの確認用
+            if let j = args.firstIndex(of: "-fakepeer"), j + 1 < args.count {
+                for n in 0..<30 { // 一覧の有効期限 (20 秒) より短い間隔で送り続ける
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 12 + Double(n) * 8) { PochiEngine.shared.debugFakePresence(args[i + 1], args[j + 1]) }
+                }
+            }
             if args.contains("-autovox") { DispatchQueue.main.asyncAfter(deadline: .now() + 9) { PochiEngine.shared.setVox(true) } }
         }
         #endif
