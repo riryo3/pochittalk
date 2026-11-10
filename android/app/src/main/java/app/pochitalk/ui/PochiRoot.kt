@@ -27,10 +27,7 @@ fun PochiRoot(state: UiState, actions: Actions) {
             .background(PochiColors.Bg)
             .safeDrawingPadding(),
     ) {
-        if (state.currentKey == null) {
-            HomeScreen(state, actions, modifier = Modifier.fillMaxSize())
-        } else {
-            RadioScreen(state, actions, onOpenRooms = {}, modifier = Modifier.fillMaxSize())
-        }
+        // Web版と同じ1画面: 入室前も無線機を出し、大きなボタンが NEW / JOIN / 話す に変わる
+        RadioScreen(state, actions, onOpenRooms = {}, modifier = Modifier.fillMaxSize())
     }
 }

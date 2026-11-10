@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -49,7 +51,7 @@ fun QrIcon() {
 
 /** 無線機の裏面 (Web版の .back-face): 招待のQRコード、ルームハッシュ、URL。 */
 @Composable
-fun QrBackFace(key: String, onBack: () -> Unit) {
+fun QrBackFace(key: String) {
     val url = remember(key) { PochiEngine.inviteUrl() ?: (PochiEngine.INVITE_BASE_URL + "?r=" + key) }
     val qr = remember(url) { runCatching { QrCode.encode(url) }.getOrNull() }
     Column(
@@ -57,9 +59,10 @@ fun QrBackFace(key: String, onBack: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxWidth()) {
             Text("招待 QR", color = Color(0xFF93C5FD), fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            SubButton(onClick = onBack, small = true) { Text("もどる", fontSize = 12.sp) }
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF374151)))
         }
         // 白いステッカー
         Box(
@@ -76,7 +79,7 @@ fun QrBackFace(key: String, onBack: () -> Unit) {
                 Text("QRコードを作れませんでした。招待URLの送信をお使いください。", color = Color(0xFF374151), fontSize = 13.sp, textAlign = TextAlign.Center)
             } else {
                 Canvas(Modifier.fillMaxWidth().aspectRatio(1f)) {
-                    val quiet = 2 // 周りの余白 (モジュール数)
+                    val quiet = 0 // 余白は、白いシールの余白 (14dp) が代わりをする
                     val cell = size.width / (qr.size + quiet * 2)
                     for (y in 0 until qr.size) for (x in 0 until qr.size) {
                         if (qr.get(x, y)) {
@@ -86,8 +89,10 @@ fun QrBackFace(key: String, onBack: () -> Unit) {
                 }
             }
         }
-        Text(formatKey(key), color = PochiColors.Sky, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, letterSpacing = 2.sp)
+        Text(formatKey(key), color = Color(0xFF38BDF8), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, letterSpacing = 2.sp)
         Text("このコードを読み取ると、同じ部屋に入れます。", color = PochiColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
-        Text(url, color = PochiColors.Muted.copy(alpha = 0.75f), fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 12.dp))
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(url, color = PochiColors.Muted.copy(alpha = 0.75f), fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 12.dp))
+        }
     }
 }

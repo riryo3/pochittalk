@@ -55,20 +55,21 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /** おうむ返しボットの部屋 (Web版の BOT_ROOM_KEY)。一覧の先頭に出す。 */
-const val BOT_ROOM_KEY = "7a0b07c1"
+const val BOT_ROOM_KEY = app.pochitalk.engine.PochiEngine.BOT_ROOM_KEY // 定義は 1 か所 (PochiEngine)
+private fun isBot(k: String) = app.pochitalk.engine.isBotRoom(k)
 private const val MAX_ROOM = 8
 private val BotGreen = Color(0xFF34D399)
 
-// Web版の部屋ダイヤルと同じ寸法・円柱のモデル。1行の高さ84dp、3行ぶんが見える。
-private val ROW = 84.dp
-private const val STEP_DEG = 52.0 // 1行あたりの回転角
+// Web版の部屋ダイヤルと同じ寸法・円柱のモデル。1行の高さ132dp、上下の端を含めて5部屋が見える。
+private val ROW = 132.dp
+private const val STEP_DEG = 36.0 // 1行あたりの回転角
 
 /**
  * 部屋を探すダイヤル (Web版の .rdial)。部屋は円柱の表面に並び、中央の1行が真正面を向く。
- * 上下に回し、赤い線に合わせた部屋をタップすると入る。ほかの部屋をタップすると、そこまで回る。
+ * 上下に回し、見えている部屋をタップすると入る (赤い線の部屋以外は、入りながらそこまで回る)。
  */
 @Composable
-fun RoomDial(rooms: List<RoomInfo>, connected: Int, pendingKey: String?, emptyText: String, onJoin: (String) -> Unit) {
+fun RoomDial(rooms: List<RoomInfo>, connected: Int, pendingKey: String?, emptyText: String, onJoin: (String) -> Unit, onCenter: (String?) -> Unit = {}) {
     val density = LocalDensity.current
     val rowPx = with(density) { ROW.toPx() }
     val radius = rowPx / (STEP_DEG * PI / 180.0).toFloat()
@@ -101,10 +102,12 @@ fun RoomDial(rooms: List<RoomInfo>, connected: Int, pendingKey: String?, emptyTe
         val keys = rooms.map { it.key }
         val preferred = rooms.indexOfFirst { it.isCurrent }.takeIf { it >= 0 }
             ?: rooms.indexOfFirst { it.key == pendingKey }.takeIf { it >= 0 } // 招待された部屋
-            ?: max(0, rooms.indexOfFirst { it.key == BOT_ROOM_KEY }) // 指定が無ければ、おうむ返しの部屋
+            ?: max(0, rooms.indexOfFirst { it.key == BOT_ROOM_KEY }) // 指定が無ければ、おうむ返しの部屋 (新しい番号)
         val target = if (userMoved) anchor?.let { keys.indexOf(it) }?.takeIf { it >= 0 } ?: preferred else preferred
         if (!listState.isScrollInProgress) listState.scrollToItem(target)
     }
+    // 赤い線に合っている部屋を、上に知らせる (入室していないとき、本体の表示部分に出す)
+    LaunchedEffect(centerIdx, rooms.map { it.key }) { onCenter(rooms.getOrNull(centerIdx)?.key) }
     LaunchedEffect(listState.isScrollInProgress, centerIdx) {
         if (!listState.isScrollInProgress) anchor = rooms.getOrNull(centerIdx)?.key
     }
@@ -154,9 +157,13 @@ fun RoomDial(rooms: List<RoomInfo>, connected: Int, pendingKey: String?, emptyTe
                             val c = cos(rad)
                             translationY = (radius * sin(rad) - off * rowPx).toFloat()
                             scaleY = max(0.04, c).toFloat()
-                            alpha = if (abs(off) > 1.85) 0f else max(0.1, c.pow(1.4)).toFloat()
+                            alpha = if (abs(off) > 2.6) 0f else max(0.12, c.pow(1.1)).toFloat()
                         },
-                        onClick = { if (i == centerIdx) onJoin(room.key) else scope.launch { listState.animateScrollToItem(i) } },
+                        onClick = {
+                            // 赤い線の部屋は、そのまま入る。ほかの行も、タップしたらその部屋に入る (回してからもう一度押さなくてよい)
+                            if (i != centerIdx) scope.launch { listState.animateScrollToItem(i) }
+                            onJoin(room.key)
+                        },
                     )
                 }
             }
@@ -214,7 +221,7 @@ private fun DialItem(room: RoomInfo, connected: Int, pending: Boolean, onLine: B
     val edge = when {
         room.air -> PochiColors.Tx
         pending -> PochiColors.Amber
-        room.key == BOT_ROOM_KEY -> BotGreen
+        isBot(room.key) -> BotGreen
         else -> Color.Transparent
     }
     val bg = when {
@@ -232,12 +239,12 @@ private fun DialItem(room: RoomInfo, connected: Int, pending: Boolean, onLine: B
     ) {
         // 左の細い帯 (3dp): ボット=緑、招待=黄、送信中=赤
         Box(Modifier.width(3.dp).fillMaxHeight().background(edge))
-        Column(Modifier.padding(start = 13.dp, end = 16.dp, top = 9.dp)) {
-            val head = (if (room.key == BOT_ROOM_KEY) "🦜 " else "") + (if (room.air) "🔴 " else "🔵 ") + formatKey(room.key) + " · 👤${room.count}" +
+        Column(Modifier.padding(start = 13.dp, end = 16.dp, top = 44.dp)) {
+            val head = (if (isBot(room.key)) "🦜 " else "") + (if (room.air) "🔴 " else "🔵 ") + formatKey(room.key) + " · 👤${room.count}" +
                 (if (room.isCurrent && room.count != connected) "（つながっているのは ${connected} 人）" else "") +
                 (if (room.count >= MAX_ROOM) " · 満員" else "") + (if (pending) " · 招待" else "")
             Text(head, color = PochiColors.Text, fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(16.dp)) // 赤い線は、1行目と2行目のすきまを通る
+            Spacer(Modifier.height(8.dp)) // 赤い線(行の真ん中)は、1行目と2行目のすきまを通る
             if (room.tag.isNotEmpty()) {
                 Text(
                     "🏷 " + room.tag + (if (room.tagBy.isNotEmpty()) "（${room.tagBy}）" else ""),
@@ -249,7 +256,7 @@ private fun DialItem(room: RoomInfo, connected: Int, pending: Boolean, onLine: B
                 room.count == 0 && room.names.isEmpty() -> "この部屋には、いま誰もいません"
                 else -> room.names.joinToString("、")
             }
-            Text(who, color = PochiColors.Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(who, color = PochiColors.Muted, fontSize = 12.sp, lineHeight = 16.sp) // 全員の名前を省略せず、「、」で折り返す
         }
     }
 }

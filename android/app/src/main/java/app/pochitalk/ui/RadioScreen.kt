@@ -34,6 +34,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,11 +91,31 @@ import kotlin.math.abs
  * 部屋一覧は、Web版と同じく、無線機の下に並べる。
  */
 @Composable
-fun RadioScreen(state: UiState, actions: Actions, onOpenRooms: () -> Unit, modifier: Modifier = Modifier) {
-    val key = state.currentKey ?: return
+fun RadioScreen(state: UiState, rawActions: Actions, onOpenRooms: () -> Unit, modifier: Modifier = Modifier) {
+    val key = state.currentKey
+    // 入室・新しい部屋・退室は、確認してから実行する (招待リンクの「JOIN 入室」だけは確認しない)
+    var confirm by remember { mutableStateOf<Confirm?>(null) }
+    val actions = remember(rawActions, key, state.rooms) {
+        Actions(
+            join = { k ->
+                val r = state.rooms.firstOrNull { it.key == k }
+                if (k == key || (r != null && r.count >= 8 && !r.isCurrent)) rawActions.join(k) // すでにいる部屋・満員は、確認の前にエンジンが知らせる
+                else confirm = Confirm.Join(k, r?.count ?: 0)
+            },
+            create = { confirm = Confirm.New },
+            leave = { confirm = Confirm.Leave },
+            share = rawActions.share,
+            micTest = rawActions.micTest,
+        )
+    }
+    var centerKey by remember { mutableStateOf<String?>(null) }
+    var drawerOpen by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
     val density = LocalDensity.current
-    val showSticky by remember { derivedStateOf { scroll.value > with(density) { 220.dp.toPx() } } }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val showSticky by remember { derivedStateOf { key != null && scroll.value > with(density) { 220.dp.toPx() } } }
+    // 部屋に入ったら、引き出しは閉じる
+    LaunchedEffect(key) { drawerOpen = false }
     Box(modifier) {
         Column(
             Modifier
@@ -100,13 +123,11 @@ fun RadioScreen(state: UiState, actions: Actions, onOpenRooms: () -> Unit, modif
                 .verticalScroll(scroll)
                 .padding(16.dp),
         ) {
-            DeviceCard(state, key, actions, onOpenRooms)
-            Spacer(Modifier.height(16.dp))
-            // Web版と同じく、部屋一覧は無線機の下に並べる
-            PochiCard {
-                RoomListCard(state, actions.join, showReconnect = false)
-            }
-            Spacer(Modifier.height(24.dp))
+            DeviceCard(state, key, centerKey, actions, rawActions, onOpenRooms = { drawerOpen = true })
+            Spacer(Modifier.height(10.dp))
+            val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
+            Text("版 $ver", color = PochiColors.Muted, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().alpha(0.7f))
+            Spacer(Modifier.height(if (key != null) 72.dp else 24.dp)) // 入室中は、下に出るモールスの帯の分をあける
         }
         if (showSticky) {
             Row(
@@ -118,15 +139,100 @@ fun RadioScreen(state: UiState, actions: Actions, onOpenRooms: () -> Unit, modif
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(formatKey(key), color = PochiColors.Sky, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                Text(formatKey(key ?: ""), color = PochiColors.Sky, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
                 SubButton(onClick = actions.leave, small = true) { Text("退出", fontSize = 12.sp) }
             }
+        }
+        // 部屋を探すダイヤルは、Web版 (狭い画面) と同じく、左端から出る引き出しに入れる
+        RoomDrawer(open = drawerOpen, onOpen = { drawerOpen = true }, onClose = { drawerOpen = false }) {
+            RoomListCard(state, { drawerOpen = false; actions.join(it) }, showReconnect = key == null, onCenter = { centerKey = it })
+        }
+        confirm?.let { c ->
+            val inRoom = key != null
+            val msg = when (c) {
+                is Confirm.Join -> "この部屋に入室しますか？\n" + formatKey(c.key) + (if (c.count > 0) "（いま ${c.count} 人）" else "") + (if (inRoom) "\nいまの部屋からは退出します。" else "")
+                Confirm.New -> "新しい部屋を作って、入室しますか？" + (if (inRoom) "\nいまの部屋からは退出します。" else "")
+                Confirm.Leave -> "この部屋から退出しますか？"
+            }
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirm = null },
+                text = { Text(msg, fontSize = 15.sp, lineHeight = 22.sp) },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        confirm = null
+                        when (c) {
+                            is Confirm.Join -> rawActions.join(c.key)
+                            Confirm.New -> rawActions.create()
+                            Confirm.Leave -> rawActions.leave()
+                        }
+                    }) { Text(if (c == Confirm.Leave) "退出する" else "入室する") }
+                },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { confirm = null }) { Text("やめる") } },
+            )
+        }
+        // モールスのキーボードは、Web版と同じく画面の下に固定し、開いたら話すボタンの上に被せる (画面を広げない)。左の引き出しやタブよりも前に出す
+        if (key != null) {
+            Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 10.dp, vertical = 8.dp)) { MorseDrawer(state) }
+        }
+    }
+}
+
+private sealed interface Confirm {
+    data class Join(val key: String, val count: Int) : Confirm
+    object New : Confirm
+    object Leave : Confirm
+}
+
+/** 左端の「部屋を探す ▶」タブから出る引き出し (Web版の dial-tab / #dialCard)。 */
+@Composable
+private fun RoomDrawer(open: Boolean, onOpen: () -> Unit, onClose: () -> Unit, content: @Composable () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val w = minOf(maxWidth * 0.88f, 400.dp)
+        val x by animateDpAsState(if (open) 0.dp else -(w + 8.dp), label = "drawer")
+        if (open) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose),
+            )
+        }
+        val drawerShape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp)
+        Column(
+            Modifier
+                .offset(x = x)
+                .width(w)
+                .fillMaxHeight()
+                .clip(drawerShape)
+                .background(PochiColors.Card)
+                .border(2.dp, PochiColors.Border, drawerShape)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+        ) { content() }
+        val tabShape = RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
+        val tabH = minOf(430.dp, maxHeight * 0.78f)
+        val tabX = if (open) w else 0.dp
+        Column(
+            Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = tabX)
+                .width(34.dp)
+                .height(tabH)
+                .clip(tabShape)
+                .background(Color(0xFF1F2937))
+                .border(1.dp, Color(0xFF374151), tabShape)
+                .clickable(onClick = if (open) onClose else onOpen),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            val label = if (open) "◀閉じる" else "部屋を探す▶"
+            label.forEach { Text(it.toString(), color = Color(0xFFCBD5E1), fontWeight = FontWeight.Bold, fontSize = 13.sp, lineHeight = 17.sp) }
         }
     }
 }
 
 @Composable
-private fun DeviceCard(state: UiState, key: String, actions: Actions, onOpenRooms: () -> Unit) {
+private fun DeviceCard(state: UiState, key: String?, centerKey: String?, actions: Actions, rawActions: Actions, onOpenRooms: () -> Unit) {
     val shape = RoundedCornerShape(28.dp)
     val meter by PochiEngine.meter.collectAsStateWithLifecycle()
     // 無線機を裏返して、招待のQRコードを見せる (部屋を移ったら表に戻る)
@@ -141,15 +247,11 @@ private fun DeviceCard(state: UiState, key: String, actions: Actions, onOpenRoom
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        if (showQr) {
-            QrBackFace(key, onBack = { showQr = false })
-            return@Column
-        }
         // ヘッダー
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Brand()
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (key != null) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SubButton(
                         onClick = { PochiEngine.reconnect(auto = false) },
                         enabled = !state.reconnecting,
@@ -160,14 +262,26 @@ private fun DeviceCard(state: UiState, key: String, actions: Actions, onOpenRoom
             }
             HorizontalDivider(thickness = 2.dp, color = PochiColors.Border)
         }
-        DisplayPanel(state, key, meter)
-        PttSection(transmitting = state.ledTx, voxOn = state.voxOn, lefty = state.lefty, pos = state.pttPos, onOpenRooms = onOpenRooms)
+        if (key == null) {
+            IdlePanel(state, centerKey, meter)
+            IdleControls(state, Actions(join = rawActions.join, create = actions.create, leave = actions.leave, share = actions.share, micTest = actions.micTest))
+            HomeFields(state, actions)
+        } else if (showQr) {
+            QrBackFace(key) // 閉じるボタンは無し。下のQRボタンでもう一度押すと元に戻る
+        } else {
+            DisplayPanel(state, key, meter)
+            PttSection(transmitting = state.ledTx, voxOn = state.voxOn, lefty = state.lefty, pos = state.pttPos, onOpenRooms = onOpenRooms)
+        }
         // フッター
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (key != null) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SubButton(onClick = actions.share, modifier = Modifier.weight(1f)) { Text("招待URLを送る", fontSize = 13.sp) }
                 // QRコードで招待 (無線機を裏返す)
-                SubButton(onClick = { showQr = true }, modifier = Modifier.width(64.dp)) { QrIcon() }
+                SubButton(
+                    onClick = { showQr = !showQr },
+                    container = if (showQr) Color(0xFF1D4ED8) else Color(0xFF374151),
+                    modifier = Modifier.width(64.dp),
+                ) { QrIcon() }
                 // スピーカーのミュート (相手の声と効果音を止める。マイクは止めない)
                 SubButton(
                     onClick = { PochiEngine.toggleSpeakerMute() },
@@ -259,9 +373,9 @@ private fun DisplayPanel(state: UiState, key: String, meter: MeterState) {
             ) {
                 // 自分 (Web版と同じ): 先頭に青い名札。話しているときは赤く光る
                 val sending = state.ledTx
-                val myName = state.nickname.trim().ifEmpty { "NoName" }
+                val myName = (if (state.logMode) "💾" else "") + state.nickname.trim().ifEmpty { "NoName" }
                 Text(
-                    (if (sending) "🎙️ " else "") + myName + "（自分）",
+                    myName + "（自分）",
                     color = if (sending) Color(0xFFFECACA) else Color(0xFFBFDBFE),
                     fontWeight = if (sending) FontWeight.Bold else FontWeight.Normal,
                     fontSize = 13.sp,
@@ -272,7 +386,7 @@ private fun DisplayPanel(state: UiState, key: String, meter: MeterState) {
                 )
                 state.peers.forEach { p ->
                     Text(
-                        (if (p.talking) "🎙️ " else "") + p.name,
+                        p.name,
                         color = if (p.talking) Color(0xFF34D399) else PochiColors.Muted,
                         fontWeight = if (p.talking) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 13.sp,
@@ -282,14 +396,28 @@ private fun DisplayPanel(state: UiState, key: String, meter: MeterState) {
                             .padding(horizontal = 8.dp, vertical = 1.dp),
                     )
                 }
-                if (state.peers.isEmpty()) {
+                // 一覧にはいるが、まだ音声がつながっていない人 (つながったら消える)
+                state.missingNames.forEach { nm ->
+                    Text(
+                        nm,
+                        color = Color(0xFFFECACA),
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF450A0A))
+                            .border(1.dp, Color(0xFFEF4444), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 1.dp),
+                    )
+                }
+                if (state.peers.isEmpty() && state.missingNames.isEmpty()) {
                     Text("（ほかの参加者を待っています）", color = PochiColors.Muted, fontSize = 13.sp, modifier = Modifier.alpha(0.6f).padding(vertical = 2.dp))
                 }
             }
             if (state.presentCount > 0) {
                 val ok = state.connectedCount >= state.presentCount
                 Text(
-                    "接続 ${state.connectedCount} / 在室 ${state.presentCount}",
+                    "接続 ${state.connectedCount} / 在室 ${state.presentCount}" +
+                        (if (state.audioOkCount in 1 until state.connectedCount) "（音声OK ${state.audioOkCount}）" else ""),
                     color = if (ok) PochiColors.Rx else PochiColors.Amber,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
@@ -310,7 +438,7 @@ private fun TagRow(state: UiState, key: String) {
         editing = false
     }
     // おうむ返しボットの部屋は、タグが固定で、書き換えられない (Web版と同じ)
-    if (key == BOT_ROOM_KEY) {
+    if (app.pochitalk.engine.isBotRoom(key)) {
         Text(
             "🏷 🦜 おうむ返しの部屋（話すと、あなたにだけ声が返ります）",
             color = PochiColors.Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -350,7 +478,7 @@ private fun TagRow(state: UiState, key: String) {
                     singleLine = true,
                     colors = pochiFieldColors(),
                     shape = RoundedCornerShape(8.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { commit() }),
                     modifier = Modifier.weight(1f),
                 )
@@ -563,5 +691,73 @@ fun FaxPaperView(paper: FaxPaper) {
                 }
             }
         }
+    }
+}
+
+/** モールスで送る (Web版の morse-drawer): 専用キーボードのキーを押すと、その文字が 700Hz の音で送信される。「fax」と打つと(隠し)FAXモード。 */
+@Composable
+private fun MorseDrawer(state: UiState) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0xFF1F2937))
+            .border(1.dp, Color(0xFF374151), shape),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(if (state.faxMode) "📠 FAXモード" else "⌨ モールスで送る", color = Color(0xFFCBD5E1), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text(
+                if (state.morseQueued.isNotEmpty()) "送信待ち ${state.morseQueued}" else if (open) "▼ 閉じる" else "▲ 開く",
+                color = if (state.morseQueued.isNotEmpty()) PochiColors.Amber else PochiColors.Muted,
+                fontSize = 12.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).padding(start = 8.dp),
+            )
+        }
+        if (open) {
+            Column(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (state.faxMode) {
+                    Text(
+                        if (state.faxText.isNotEmpty()) state.faxText + "▌" else "FAXモード: 文字を打って ⏎ で送信（ESCで終了）",
+                        color = if (state.faxText.isNotEmpty()) PochiColors.Amber else PochiColors.Muted,
+                        fontFamily = FontFamily.Monospace, fontSize = 14.sp,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                }
+                val rows = listOf("1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM", ".,?!/-:")
+                rows.forEachIndexed { ri, r ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (ri == 3) MorseKey("ESC", "ESC", Modifier.weight(1.6f))
+                        r.forEach { c -> MorseKey(c.toString(), c.toString(), Modifier.weight(1f)) }
+                        if (ri == 3) MorseKey("⌫", "BS", Modifier.weight(1.6f))
+                        if (ri == 4) {
+                            if (state.faxMode) MorseKey("⏎", "ENTER", Modifier.weight(1.6f), Color(0xFF1D4ED8))
+                        }
+                    }
+                }
+                if (state.morseSending) {
+                    SubButton(onClick = { PochiEngine.abortMorse() }, modifier = Modifier.fillMaxWidth(), small = true) { Text("送信を中止", fontSize = 12.sp) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MorseKey(label: String, key: String, modifier: Modifier, container: Color = Color(0xFF374151)) {
+    Box(
+        modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(container)
+            .clickable { PochiEngine.morseKey(key) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = if (label.length > 1) 11.sp else 15.sp, maxLines = 1)
     }
 }

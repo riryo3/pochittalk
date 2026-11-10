@@ -9,6 +9,7 @@ import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.tanh
@@ -41,13 +42,14 @@ class RadioSounds {
     fun playCrosstalk() = play("crosstalk") { synthCrosstalk() }
     fun playTune() = play("tune") { synthTune() }
     fun playEnter() = play("enter") { synthEnter() }
+    fun playNewRoom() = play("newroom") { synthNewRoom() }
 
     private fun play(name: String, synth: () -> ShortArray) {
         val gain = if (muted) 0f else volume
         if (gain <= 0f) return
         try {
             // 確率的に作るノイズは毎回作り直す。トーン系だけキャッシュ。
-            val base = if (name == "start" || name == "busy" || name == "enter") cache.getOrPut(name, synth) else synth()
+            val base = if (name == "start" || name == "busy" || name == "enter" || name == "newroom") cache.getOrPut(name, synth) else synth()
             val samples = if (gain == 1f) base else ShortArray(base.size) { i -> (base[i] * gain).toInt().coerceIn(-32767, 32767).toShort() }
             val track = AudioTrack.Builder()
                 .setAudioAttributes(
@@ -190,6 +192,28 @@ class RadioSounds {
         note(1046.5, 0.00, 0.09, 0.07)
         note(1568.0, 0.08, 0.60, 0.07)
         note(3136.0, 0.08, 0.30, 0.015)
+        return toShorts(f)
+    }
+
+    /** 新しい部屋ができた音 (Web版と同じ): 三角波の 5 音が上がっていく。入室音とは別の音。 */
+    private fun synthNewRoom(): ShortArray {
+        val total = (SAMPLE_RATE * 1.2).toInt()
+        val f = FloatArray(total)
+        val freqs = doubleArrayOf(659.3, 784.0, 1046.5, 1318.5, 2093.0)
+        for (n in freqs.indices) {
+            val s0 = (n * 0.09 * SAMPLE_RATE).toInt()
+            val dur = if (n == freqs.size - 1) 0.55 else 0.14
+            val len = (dur * SAMPLE_RATE).toInt()
+            val vol = 0.08
+            for (i in 0 until len) {
+                if (s0 + i >= total) break
+                val t = i.toDouble() / SAMPLE_RATE
+                val ph = (freqs[n] * t) % 1.0
+                val tri = 4.0 * abs(ph - 0.5) - 1.0
+                val env = if (t < 0.008) vol * (t / 0.008) else vol * 0.001.pow((t - 0.008) / (dur - 0.008)).coerceAtLeast(0.0)
+                f[s0 + i] += (tri * env).toFloat()
+            }
+        }
         return toShorts(f)
     }
 

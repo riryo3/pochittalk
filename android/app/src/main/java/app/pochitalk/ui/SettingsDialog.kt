@@ -15,6 +15,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -120,6 +124,13 @@ fun SettingsDialog(state: UiState, actions: Actions, onShowAbout: () -> Unit, on
                 )
                 Text("スライダーを離すと、試しに「ガッ」と鳴ります。効果音を消したいときは、音量を 0% にしてください。", color = PochiColors.Muted, fontSize = 12.sp)
 
+                SwitchRow("新しい部屋ができたら、音で知らせる", state.notifyRoom) { PochiEngine.setNotifyRoom(it) }
+                Text("音だけです（画面の知らせや、通知は出しません）。効果音の音量が 0% のときは鳴りません。", color = PochiColors.Muted, fontSize = 12.sp)
+
+                SectionTitle("通信の記録")
+                SwitchRow("通信の記録を、この端末に残す", state.logMode) { PochiEngine.setLogMode(it) }
+                Text("標準では、通信の記録を端末に保存しません。オンにすると、最大 300 行を、この端末だけに保存します（外部へは送りません）。オフにすると消えます。オンの間は、名前の前に 💾 が付き、同じ部屋の人にもその名前で見えます。", color = PochiColors.Muted, fontSize = 12.sp, lineHeight = 18.sp)
+
                 SectionTitle("再接続")
                 SwitchRow("自動で再接続する", state.autoReconnect) { PochiEngine.setAutoReconnect(it) }
                 Text("オフのときは、人数のずれ・回線の復帰・画面に戻ったときに、自動ではつなぎ直しません。つながらないときは、「再接続」を押してください。", color = PochiColors.Muted, fontSize = 12.sp)
@@ -163,7 +174,8 @@ private fun SectionTitle(text: String) {
 /** 初回案内。起動時に出す (設定でオフにできる)。 */
 @Composable
 fun WelcomeDialog(state: UiState, onSettings: () -> Unit, onAbout: () -> Unit, onClose: () -> Unit) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // 同意するまでは、戻る操作や外側のタップでは閉じられない
+    Dialog(onDismissRequest = { if (state.consentOk) onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier
                 .padding(16.dp)
@@ -194,7 +206,22 @@ fun WelcomeDialog(state: UiState, onSettings: () -> Unit, onAbout: () -> Unit, o
             Text("使い方と、プライバシー（見える情報、保存されるもの）を説明しています。", color = PochiColors.Text, fontSize = 13.sp, lineHeight = 20.sp)
             SubButton(onClick = onAbout, modifier = Modifier.fillMaxWidth(), container = Color(0xFF1E293B)) { Text("このアプリについて") }
             SwitchRow("次回も表示する", state.welcomeOn) { PochiEngine.setWelcomeOn(it) }
-            SubButton(onClick = onClose, modifier = Modifier.fillMaxWidth(), container = Color(0xFF2563EB)) { Text("はじめる") }
+            var agreed by remember { mutableStateOf(state.consentOk) }
+            if (!state.consentOk) {
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.clickable { agreed = !agreed }) {
+                    androidx.compose.material3.Checkbox(checked = agreed, onCheckedChange = { agreed = it })
+                    Text(
+                        "「このアプリについて」を読み、次のことを了解しました。個人が作ったα版で、動作や安全性の保証はありません。部屋は公開で、知らない人にも声が聞こえます。人数が多いと、つながりにくくなることがあります。自己責任で使います。",
+                        color = PochiColors.Text, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+            }
+            SubButton(
+                onClick = { if (!state.consentOk) PochiEngine.acceptConsent(); onClose() },
+                enabled = agreed,
+                modifier = Modifier.fillMaxWidth(),
+                container = Color(0xFF2563EB),
+            ) { Text("はじめる") }
         }
     }
 }
