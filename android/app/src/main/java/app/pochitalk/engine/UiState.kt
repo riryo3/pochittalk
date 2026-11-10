@@ -11,7 +11,20 @@ data class RoomInfo(
     /** 話題タグと、付けた人の名前 (なければ空)。 */
     val tag: String = "",
     val tagBy: String = "",
+    /** 部屋を開いた時刻 (エポックms)。不明・無人は0。 */
+    val openAt: Long = 0L,
 )
+
+/** 経過時間の表示 (Web版の fmtElapsed)。 */
+fun fmtElapsed(ms: Long): String {
+    val m = (ms / 60_000L).coerceAtLeast(0)
+    return when {
+        m < 1 -> "いま開いたばかり"
+        m < 60 -> "${m}分"
+        m < 1440 -> "${m / 60}時間${m % 60}分"
+        else -> "${m / 1440}日${(m % 1440) / 60}時間"
+    }
+}
 
 data class PeerInfo(val id: String, val name: String, val talking: Boolean)
 

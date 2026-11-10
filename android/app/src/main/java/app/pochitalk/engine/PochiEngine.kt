@@ -144,6 +144,8 @@ object PochiEngine {
         /** 相手の「音声が通っている相手の数」と「入室してからの秒数」。無ければ -1 / 9999 (Web版と同じ)。 */
         val cn: Int = -1,
         val ag: Int = 9999,
+        /** 相手が見ている「部屋を開いた時刻」(エポックms)。無い/不正は0。 */
+        val op: Long = 0L,
     )
     private val lobbyEntries = HashMap<String, LobbyEntry>()
 
@@ -171,6 +173,11 @@ object PochiEngine {
     @Volatile private var hiddenAt = 0L
     private var micTest = false
     private var roomEnterTime = 0L
+    /** 部屋を開いた時刻 (一覧で見えた値と自分の値の最小)。直前の部屋の値は、60秒以内に戻れば引き継ぐ。 */
+    private var roomOpenAt = 0L
+    private var savedOpenKey: String? = null
+    private var savedOpenAt = 0L
+    private var savedOpenTime = 0L
     private var currentTalkerId: String? = null
     private var isTransmitting = false
     private var pressed = false
@@ -354,6 +361,7 @@ object PochiEngine {
             tagAt = d.optLong("at", 0L),
             cn = d.optInt("cn", -1).let { if (it in 0..31) it else -1 },
             ag = d.optInt("ag", 9999).let { if (it >= 0) it else 9999 },
+            op = d.optLong("op", 0L).let { if (it > 1_600_000_000_000L && it <= System.currentTimeMillis() + 600_000L) it else 0L },
         )
         if (firstOfRoom) maybeNotifyNewRoom(ch)
         if (isNew) {
@@ -428,7 +436,8 @@ object PochiEngine {
             JSONObject().put("ch", key).put("talking", isTransmitting).put("name", shownName())
                 .put("tag", roomMeta.tag).put("by", roomMeta.by).put("at", roomMeta.at)
                 .put("cn", room?.goodLinkCount() ?: 0)
-                .put("ag", ((System.currentTimeMillis() - roomEnterTime) / 1000).toInt().coerceAtLeast(0)),
+                .put("ag", ((System.currentTimeMillis() - roomEnterTime) / 1000).toInt().coerceAtLeast(0))
+                .put("op", roomOpenAt),
         )
     }
 
@@ -439,6 +448,7 @@ object PochiEngine {
         var tag: String = "",
         var tagBy: String = "",
         var tagAt: Long = 0L,
+        var openAt: Long = 0L,
     )
 
     private fun renderScan() {
@@ -449,6 +459,7 @@ object PochiEngine {
             s.count++
             s.names.add(e.name)
             if (e.talking) s.air = true
+            if (e.op > 0 && (s.openAt == 0L || e.op < s.openAt)) s.openAt = e.op
             if (e.tagAt > s.tagAt) { // 部屋のタグは、いちばん新しいものを採用する
                 s.tagAt = e.tagAt
                 s.tag = e.tag
@@ -458,6 +469,8 @@ object PochiEngine {
         val cur = currentKey
         if (cur != null) {
             val s = stats.getOrPut(cur) { Stat() }
+            if (s.openAt in 1 until roomOpenAt) roomOpenAt = s.openAt // 入室後も、一覧の最小値に合わせ直す
+            if (roomOpenAt > 0 && (s.openAt == 0L || roomOpenAt < s.openAt)) s.openAt = roomOpenAt
             s.count++
             s.names.add(0, shownName() + "(自分)")
             if (isTransmitting) s.air = true
@@ -482,6 +495,7 @@ object PochiEngine {
                 isCurrent = k == cur,
                 tag = s.tag,
                 tagBy = s.tagBy,
+                openAt = if (s.count > 0) s.openAt else 0L,
             )
         }
         _state.update { it.copy(rooms = rooms, totalPeople = total, pendingKey = pend) }
@@ -531,6 +545,11 @@ object PochiEngine {
         _state.update { it.copy(micTest = false) }
         stopVoxInternal() // Web版と同じく、入室するとVOXはオフに戻る
         roomEnterTime = System.currentTimeMillis()
+        run {
+            val lobbyMin = lobbyEntries.values.filter { it.key == key && it.op > 0 }.minOfOrNull { it.op } ?: 0L
+            val resume = if (savedOpenKey == key && roomEnterTime - savedOpenTime <= 60_000L) savedOpenAt else 0L
+            roomOpenAt = listOf(lobbyMin, resume).filter { it > 0 }.minOrNull() ?: roomEnterTime
+        }
         roomMeta = Meta("", "", 0L)
         _state.update { it.copy(roomTag = "", roomTagBy = "") }
 
@@ -661,6 +680,9 @@ object PochiEngine {
         if (isTransmitting) {
             pressed = false
             stopTransmission()
+        }
+        if (currentKey != null && roomOpenAt > 0) {
+            savedOpenKey = currentKey; savedOpenAt = roomOpenAt; savedOpenTime = System.currentTimeMillis()
         }
         room?.leave()
         room = null

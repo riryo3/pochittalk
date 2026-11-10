@@ -317,6 +317,7 @@ private fun DisplayPanel(state: UiState, key: String, meter: MeterState) {
                 fontWeight = FontWeight.Black,
                 fontSize = 38.sp,
             )
+            ElapsedLine(state.rooms.firstOrNull { it.key == key }, 18.dp, 12.sp)
             val sub = state.flash ?: state.morseText
             val isMorse = state.flash == null && state.morseText.isNotEmpty()
             Text(
