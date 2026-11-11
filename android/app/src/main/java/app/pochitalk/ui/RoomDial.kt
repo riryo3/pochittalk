@@ -57,7 +57,7 @@ import kotlin.math.sin
 /** おうむ返しボットの部屋 (Web版の BOT_ROOM_KEY)。一覧の先頭に出す。 */
 const val BOT_ROOM_KEY = app.pochitalk.engine.PochiEngine.BOT_ROOM_KEY // 定義は 1 か所 (PochiEngine)
 private fun isBot(k: String) = app.pochitalk.engine.isBotRoom(k)
-private const val MAX_ROOM = 8
+private val MAX_ROOM = app.pochitalk.engine.PochiEngine.MAX_ROOM
 private val BotGreen = Color(0xFF34D399)
 
 // Web版の部屋ダイヤルと同じ寸法・円柱のモデル。1行の高さ132dp、上下の端を含めて5部屋が見える。
@@ -105,6 +105,19 @@ fun RoomDial(rooms: List<RoomInfo>, connected: Int, pendingKey: String?, emptyTe
             ?: max(0, rooms.indexOfFirst { it.key == BOT_ROOM_KEY }) // 指定が無ければ、おうむ返しの部屋 (新しい番号)
         val target = if (userMoved) anchor?.let { keys.indexOf(it) }?.takeIf { it >= 0 } ?: preferred else preferred
         if (!listState.isScrollInProgress) listState.scrollToItem(target)
+    }
+    // 外付けキーボード: 上下の矢印で1つずつ回し、Enter で赤い線の部屋に入る
+    val latestJoin by rememberUpdatedState(onJoin)
+    LaunchedEffect(Unit) {
+        HardKeys.dial.collect { k ->
+            val n = latestRooms.size
+            if (n == 0) return@collect
+            when (k) {
+                "UP" -> listState.animateScrollToItem((centerIdx - 1).coerceAtLeast(0))
+                "DOWN" -> listState.animateScrollToItem((centerIdx + 1).coerceAtMost(n - 1))
+                "ENTER" -> latestRooms.getOrNull(centerIdx)?.let { latestJoin(it.key) }
+            }
+        }
     }
     // 赤い線に合っている部屋を、上に知らせる (入室していないとき、本体の表示部分に出す)
     LaunchedEffect(centerIdx, rooms.map { it.key }) { onCenter(rooms.getOrNull(centerIdx)?.key) }

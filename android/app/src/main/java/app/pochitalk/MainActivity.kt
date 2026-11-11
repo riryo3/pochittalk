@@ -17,6 +17,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import app.pochitalk.engine.PochiEngine
 import app.pochitalk.engine.UiEvent
 import app.pochitalk.ui.Actions
+import app.pochitalk.ui.HardKeys
 import app.pochitalk.ui.PochiRoot
 import app.pochitalk.ui.PochiTheme
 import kotlinx.coroutines.launch
@@ -58,6 +59,69 @@ class MainActivity : ComponentActivity() {
                 PochiRoot(state, actions)
             }
         }
+    }
+
+    // ================================================================ 外付け・Bluetooth キーボード (Web版のキー操作に合わせる)
+    // 文字入力欄などが先に処理したキーは、ここへは来ない。リピート (押しっぱなし) は、無視する。
+
+    // 画面の部品より先にキーを見る (Compose のフォーカスがキーを先に食べるのを避ける)。文字入力中は、通常の入力に任せる
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        if (!imm.isAcceptingText) {
+            val handled = if (event.action == android.view.KeyEvent.ACTION_DOWN) hardKeyDown(event.keyCode, event) else if (event.action == android.view.KeyEvent.ACTION_UP) hardKeyUp(event.keyCode) else false
+            if (handled) return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean = super.onKeyDown(keyCode, event)
+
+    private fun hardKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if (event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) return false
+        val inRoom = PochiEngine.state.value.currentKey != null
+        val drawer = HardKeys.drawerOpen
+        val first = event.repeatCount == 0
+        when (keyCode) {
+            android.view.KeyEvent.KEYCODE_SPACE -> {
+                if (!inRoom || drawer) return false
+                if (first) PochiEngine.hardSpaceDown()
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_DPAD_UP, android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+                if (!drawer) return false
+                HardKeys.dial.tryEmit(if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP) "UP" else "DOWN")
+                return true
+            }
+            android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (drawer) { if (first) HardKeys.dial.tryEmit("ENTER"); return true }
+                if (inRoom) { if (first) PochiEngine.morseKey("ENTER"); return true }
+            }
+            android.view.KeyEvent.KEYCODE_ESCAPE -> {
+                if (drawer) { if (first) HardKeys.closeDrawer.tryEmit(Unit); return true }
+                if (inRoom) { if (first) PochiEngine.morseKey("ESC"); return true }
+            }
+            android.view.KeyEvent.KEYCODE_TAB -> {
+                if (inRoom && !drawer && PochiEngine.state.value.faxMode) { if (first) PochiEngine.morseKey("MODE"); return true }
+            }
+            android.view.KeyEvent.KEYCODE_DEL -> {
+                if (inRoom && !drawer) { if (first) PochiEngine.morseKey("BS"); return true }
+            }
+            else -> {
+                if (inRoom && !drawer) {
+                    val ch = event.unicodeChar
+                    if (ch > 32 && ch != 127) {
+                        if (first) PochiEngine.morseKey(String(Character.toChars(ch)))
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private fun hardKeyUp(keyCode: Int): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_SPACE) { PochiEngine.hardSpaceUp(); return true }
+        return false
     }
 
     override fun onNewIntent(intent: Intent) {
