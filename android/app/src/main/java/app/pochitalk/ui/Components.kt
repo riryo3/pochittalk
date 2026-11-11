@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -120,7 +121,7 @@ private fun matchSearch(room: RoomInfo, f: SearchFilter): Boolean {
 
 /** 「いまある部屋」の一覧。ホーム画面と無線機画面の両方に出す。検索・話題タグ付き。 */
 @Composable
-fun RoomListCard(state: UiState, onJoin: (String) -> Unit, showReconnect: Boolean = false, onCenter: (String?) -> Unit = {}) {
+fun RoomListCard(state: UiState, onJoin: (String) -> Unit, showReconnect: Boolean = false, onCenter: (String?) -> Unit = {}, canFocus: Boolean = true) {
     var query by rememberSaveable { mutableStateOf("") }
     val filter = parseSearch(query)
     var all = state.rooms
@@ -145,7 +146,8 @@ fun RoomListCard(state: UiState, onJoin: (String) -> Unit, showReconnect: Boolea
             singleLine = true,
             colors = pochiFieldColors(),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.fillMaxWidth(),
+            // 引き出しが閉じている間は、検索欄にフォーカスを入れない (外付けキーボードの文字を、検索欄が食べないように)
+            modifier = Modifier.fillMaxWidth().focusProperties { this.canFocus = canFocus },
         )
         if (showReconnect) {
             SubButton(

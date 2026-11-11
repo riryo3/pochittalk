@@ -27,7 +27,7 @@ let aboutSections: [AboutSection] = [
             "部屋の中では、「話題タグ」をつけられます（30文字まで）。誰でも変えられ、付けた人の名前が添えられます。部屋の一覧にも表示されます。",
             "相手が見つからない、声が届かなくなったときは、「再接続」を押すと、部屋に入ったまま接続をやり直します。回線が切り替わったときや、しばらく離れて戻ったとき（通話中でなければ）は、自動でつなぎ直します。",
             "VOXをオンにすると、声を拾って自動で送信します（イヤホン推奨）。部屋を出る、または部屋を変えると、VOXはオフに戻ります。",
-            "人数の目安は1部屋あたり6〜8人までです（8人が上限）。",
+            "人数の制限はありませんが、人数が多いと音が不安定になることがあります（目安は1部屋あたり6〜8人）。",
             "部屋に入っている間は、画面を消したり他のアプリを開いたりしても通話が続き、VOXも使えます。画面の上にマイクの表示が出ます。",
         ]),
     ]),
@@ -110,7 +110,7 @@ struct AboutView: View {
                 }.padding(16)
             }
             .background(PC.bg)
-            .navigationTitle("このアプリについて").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("このアプリについて").inlineNavTitle()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("閉じる") { dismiss() } } }
         }
         .preferredColorScheme(.dark)

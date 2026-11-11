@@ -3,7 +3,12 @@ import Combine
 import Foundation
 import Network
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
+#if os(macOS)
+import AVFoundation
+#endif
 import WebRTC
 
 /// アプリ全体の状態とふるまい。Web 版 (worker.js) のクライアントコードに対応する (Android 版 PochiEngine.kt の移植):
@@ -16,7 +21,7 @@ final class PochiEngine: ObservableObject {
 
     // ---- Web 版と共通のプロトコル定数。変えると Web 版・Android 版と通話できなくなる
     static let appId = "pochitalk-v2" // 0.25.4 の通信形式は 0.20.0 と互換が無いので、識別名も新しくしている (Web 版と同じ)
-    static let maxRoom = 8 // 1つの部屋は8人まで (Web 版と同じ)
+    static let maxRoom = 99 // 1つの部屋の人数の上限 (Web 版の MAX_ROOM と同じ値。実質、制限なし)
     private static let actionPttState = "pttState"
     private static let actionPttName = "pttName"
     private static let actionFaxPage = "faxPage" // {c, d}: FAX の絵 (列数と、白黒のビット列の base64)
@@ -64,7 +69,7 @@ final class PochiEngine: ObservableObject {
     /// 自動で再接続するか (設定。標準はオフ)。オフでも、手動の「再接続」と、マイクの取り直し、音声セッションの復帰は動く。
     private var autoReconnect = false
 
-    private struct LobbyEntry { var key: String; var talking: Bool; var name: String; var ts: Int; var tag: String; var tagBy: String; var tagAt: Int }
+    private struct LobbyEntry { var key: String; var talking: Bool; var name: String; var ts: Int; var tag: String; var tagBy: String; var tagAt: Int; var op: Int }
     private var lobbyEntries: [String: LobbyEntry] = [:]
 
     private var room: TrysteroRoom?
@@ -94,6 +99,8 @@ final class PochiEngine: ObservableObject {
     private var hiddenAt = 0
     private var micTest = false
     private var roomEnterTime = 0
+    /// 部屋を開いた時刻 (エポック ms。0=不明)。一覧で見えている値と自分の値の、いちばん早いもの。
+    private var roomOpenAt = 0
     private var currentTalkerId: String?
     private var isTransmitting = false
     private var pressed = false
@@ -264,6 +271,8 @@ final class PochiEngine: ObservableObject {
         return Array(left.dropFirst(min(unnamed, left.count)))
     }
 
+    func clearDiagLines() { DispatchQueue.main.async { self.diagLines = [] } }
+
     private func diag(_ line: String) {
         if st.logRec {
             RT.post { [self] in
@@ -273,12 +282,13 @@ final class PochiEngine: ObservableObject {
         }
         RT.log(line)
         let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        DispatchQueue.main.async { self.diagLines = Array((self.diagLines + ["\(t) \(line)"]).suffix(40)) }
+        DispatchQueue.main.async { self.diagLines = Array((self.diagLines + ["\(t) \(line)"]).suffix(400)) }
     }
 
     // ================================================================ 権限
 
     private func currentMicPermission() -> MicPermission {
+        #if os(iOS)
         if #available(iOS 17.0, *) {
             switch AVAudioApplication.shared.recordPermission {
             case .granted: return .granted
@@ -291,6 +301,13 @@ final class PochiEngine: ObservableObject {
         case .denied: return .denied
         default: return .undetermined
         }
+        #else
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return .granted
+        case .denied, .restricted: return .denied
+        default: return .undetermined
+        }
+        #endif
     }
 
     private var micGranted: Bool { currentMicPermission() == .granted }
@@ -310,8 +327,12 @@ final class PochiEngine: ObservableObject {
                 then?()
             }
         }
+        #if os(iOS)
         if #available(iOS 17.0, *) { AVAudioApplication.requestRecordPermission(completionHandler: finish) }
         else { AVAudioSession.sharedInstance().requestRecordPermission(finish) }
+        #else
+        AVCaptureDevice.requestAccess(for: .audio, completionHandler: finish)
+        #endif
     }
 
     // ================================================================ ロビー (部屋一覧)
@@ -335,6 +356,13 @@ final class PochiEngine: ObservableObject {
     }
     #endif
 
+    /// op (部屋を開いた時刻) の検査: 1.6e12 より大きく、現在時刻+10分以下だけ採用。
+    static func validOp(_ v: Any?) -> Int {
+        let n: Double
+        if let i = v as? Int { n = Double(i) } else if let d = v as? Double { n = d } else { return 0 }
+        return (n > 1.6e12 && n <= Double(RT.nowMs()) + 600_000) ? Int(n) : 0
+    }
+
     private func onPresence(_ pubkey: String, _ d: [String: Any]) {
         let ch = ((d["ch"] as? String) ?? "").lowercased()
         if ch.isEmpty {
@@ -346,7 +374,7 @@ final class PochiEngine: ObservableObject {
         let roomWasKnown = lobbyEntries.values.contains { $0.key == ch }
         lobbyEntries[pubkey] = LobbyEntry(
             key: ch, talking: (d["talking"] as? Bool) ?? false, name: String(((d["name"] as? String) ?? "?").prefix(12)),
-            ts: RT.nowMs(), tag: capTag(d["tag"] as? String), tagBy: String(((d["by"] as? String) ?? "").prefix(12)), tagAt: int(d["at"]))
+            ts: RT.nowMs(), tag: capTag(d["tag"] as? String), tagBy: String(((d["by"] as? String) ?? "").prefix(12)), tagAt: int(d["at"]), op: Self.validOp(d["op"]))
         if !roomWasKnown { chimeNewRoom(ch) }
         if isNew {
             // 新しく来た人に、こちらの在室をすぐ知らせる (Web 版の announceSoon)
@@ -375,17 +403,18 @@ final class PochiEngine: ObservableObject {
         }
         presAnnounced = true
         presLastSent = RT.nowMs()
-        p.publish(["ch": key, "cn": room?.goodLinkCount() ?? 0, "ag": max(0, (RT.nowMs() - roomEnterTime) / 1000), "talking": isTransmitting, "name": shownName, "tag": roomMeta.tag, "by": roomMeta.by, "at": roomMeta.at])
+        p.publish(["ch": key, "cn": room?.goodLinkCount() ?? 0, "ag": max(0, (RT.nowMs() - roomEnterTime) / 1000), "talking": isTransmitting, "name": shownName, "tag": roomMeta.tag, "by": roomMeta.by, "at": roomMeta.at, "op": roomOpenAt])
     }
 
     private func renderScan() {
         RT.log("scan: lobby=\(lobbyEntries.count) presence=\(presence != nil) net=\(net != nil)")
-        struct Stat { var count = 0; var air = false; var names: [String] = []; var tag = ""; var tagBy = ""; var tagAt = 0 }
+        struct Stat { var op = 0; var count = 0; var air = false; var names: [String] = []; var tag = ""; var tagBy = ""; var tagAt = 0 }
         var stats: [String: Stat] = [:]
         for e in lobbyEntries.values {
             var s = stats[e.key] ?? Stat()
             s.count += 1
             s.names.append(e.name)
+            if e.op > 0 { s.op = s.op == 0 ? e.op : min(s.op, e.op) }
             if e.talking { s.air = true }
             if e.tagAt > s.tagAt { s.tagAt = e.tagAt; s.tag = e.tag; s.tagBy = e.tagBy } // 部屋のタグは、いちばん新しいものを採用する
             stats[e.key] = s
@@ -396,6 +425,8 @@ final class PochiEngine: ObservableObject {
             s.count += 1
             s.names.insert(shownName + "(自分)", at: 0)
             if isTransmitting { s.air = true }
+            if roomOpenAt > 0 { roomOpenAt = s.op > 0 ? min(roomOpenAt, s.op) : roomOpenAt }
+            s.op = roomOpenAt
             if roomMeta.at > s.tagAt { s.tagAt = roomMeta.at; s.tag = roomMeta.tag; s.tagBy = roomMeta.by }
             stats[cur] = s
         }
@@ -412,7 +443,7 @@ final class PochiEngine: ObservableObject {
         st.rooms = order.map { k in
             let s = stats[k]!
             return RoomInfo(key: k, count: s.count, air: s.air, names: s.names, invited: k == pend && s.count == 0,
-                            isCurrent: k == cur, tag: s.tag, tagBy: s.tagBy)
+                            isCurrent: k == cur, tag: s.tag, tagBy: s.tagBy, openAt: s.count > 0 ? s.op : 0)
         }
         st.pendingKey = pend
         commit()
@@ -447,6 +478,7 @@ final class PochiEngine: ObservableObject {
         st.micTest = false
         stopVoxInternal() // Web 版と同じく、入室すると VOX はオフに戻る
         roomEnterTime = RT.nowMs()
+        roomOpenAt = lobbyEntries.values.filter { $0.key == key && $0.op > 0 }.map(\.op).min() ?? RT.nowMs()
         roomMeta = ("", "", 0)
         st.roomTag = ""; st.roomTagBy = ""
 
@@ -549,6 +581,7 @@ final class PochiEngine: ObservableObject {
         peers.removeAll()
         currentTalkerId = nil
         currentKey = nil
+        roomOpenAt = 0
         stopVoxInternal()
         crosstalkJob?.cancel()
         if !keepAudio { exitAudioSession() }
@@ -891,6 +924,7 @@ final class PochiEngine: ObservableObject {
         if isTransmitting { stopTransmission(quiet: true) } else { resetMorse() }
         faxMode = true
         faxText = ""
+        st.faxAnalog = faxAnalog
         faxPaperTx = FaxPaper()
         st.faxPaper = faxPaperTx
         st.faxCompose = ""
@@ -903,6 +937,13 @@ final class PochiEngine: ObservableObject {
         faxMode = false; faxText = ""; faxProbe = ""
         st.faxCompose = nil
         flash("FAXモード終了")
+    }
+
+    /// FAX の送り方。false = アナログライクデジタル (音と同時に、中身もデータ便で送る。きれいに読める) /
+    /// true = 完全アナログ (音だけ。受信側が音から読むので、ゆがみもそのまま出る)。端末に保存 (Web 版は pochitalk_fax_analog)。
+    private var faxAnalog: Bool {
+        get { defaults.bool(forKey: "pochitalk_fax_analog") }
+        set { defaults.set(newValue, forKey: "pochitalk_fax_analog") }
     }
 
     /// FAX モード中のキー: 文字は書き足し、BS で消し、⏎ で送信、ESC で終了 (紙を隠して、モールスで「ESC」も送る)。
@@ -918,6 +959,7 @@ final class PochiEngine: ObservableObject {
             return
         }
         if faxTxActive { return } // 送信中は、打てない
+        if k == "TAB" { faxAnalog.toggle(); st.faxAnalog = faxAnalog; flash(faxAnalog ? "FAX: 完全アナログ（音だけで送る。ゆがみもそのまま出ます）" : "FAX: アナログライクデジタル（中身はデータでも届ける。きれいに読めます）"); commit(); return }
         switch k {
         case "ENTER": if !faxText.isEmpty { startFaxTx() }
         case "BS": if !faxText.isEmpty { faxText.removeLast() }
@@ -948,7 +990,7 @@ final class PochiEngine: ObservableObject {
         faxPaperTx = FaxPaper()
         st.faxPaper = faxPaperTx
         commit()
-        faxPageAction?.sendJson(FaxText.payload(grid)) // 中身はデータ便でも先に送る (表示は音に合わせて後から)
+        if !faxAnalog { faxPageAction?.sendJson(FaxText.payload(grid)) } // 中身はデータ便でも先に送る (表示は音に合わせて後から)。完全アナログのときは送らない
 
         // 時刻つきの動作の列に直して、順に予約する
         var events: [(Int, () -> Void)] = []
@@ -997,7 +1039,7 @@ final class PochiEngine: ObservableObject {
         morseJob?.cancel(); morseJob = nil
         morseQueue.removeAll(); morsePlaying = false
         device.morseMode = false; device.morseKey = false
-        st.morseText = ""
+        st.morseText = ""; st.morseSent = ""
     }
 
     private func startMorse() {
@@ -1030,6 +1072,7 @@ final class PochiEngine: ObservableObject {
             return
         }
         let ch = morseQueue.removeFirst()
+        st.morseSent = String((st.morseSent + String(ch)).suffix(20)) // 送り終えた分 + いま送る文字
         st.morseText = String(morseQueue); commit()
         if ch == " " { morseJob = RT.after(600) { [self] in morseNext(session, first: first) }; return }
         guard let pat = morseCode[ch] else { return morseNext(session, first: first) }
@@ -1040,7 +1083,7 @@ final class PochiEngine: ObservableObject {
             steps.append((true, c == "." ? 100 : 300))
             if i < sym.count - 1 { steps.append((false, first ? 150 : 100)) } // 先頭文字は隙間を広めに
         }
-        steps.append((false, 100))
+        steps.append((false, morseQueue.isEmpty ? 400 : 100)) // 最後の文字のあとは、長めに黙る (受け側が、最後の点を点と数えられるように)
         func run(_ i: Int) {
             guard session == morseSession else { return }
             if i == steps.count {
@@ -1243,8 +1286,16 @@ final class PochiEngine: ObservableObject {
         }
     }
 
-    /// スライダーを離したときの試し聴き (「ガッ」)。
-    func previewSfx() { RT.post { [self] in sounds.playEnd() } }
+    /// 音量を変えたときの試し聴き (発話終了の「ガッ」)。スライダーを動かしている間は、0.3 秒に 1 回まで。部屋の外でも鳴る。
+    private var lastSfxPreview = 0
+    func previewSfx(throttled: Bool = false) {
+        RT.post { [self] in
+            let now = RT.nowMs()
+            if throttled && now - lastSfxPreview < 300 { return }
+            lastSfxPreview = now
+            sounds.playPreview()
+        }
+    }
 
     func setAutoReconnect(_ on: Bool) {
         RT.post { [self] in

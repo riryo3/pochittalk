@@ -68,14 +68,17 @@ private struct DialRow: View {
             edge.frame(width: 3)
             VStack(alignment: .leading, spacing: 0) {
                 Text(head).font(.system(size: 14, design: .monospaced)).foregroundStyle(PC.text).lineLimit(1).frame(height: 26, alignment: .leading)
-                Spacer().frame(height: 13)
+                TimelineView(.periodic(from: .now, by: 15)) { tl in
+                    Text(openLabel(room.key, room.openAt, now: Int(tl.date.timeIntervalSince1970 * 1000))).font(.system(size: 11)).foregroundStyle(PC.muted).lineLimit(1)
+                }.frame(height: 15, alignment: .leading).padding(.top, 1)
+                Spacer().frame(height: 9)
                 if !room.tag.isEmpty {
                     Text("🏷 " + room.tag + (room.tagBy.isEmpty ? "" : "（\(room.tagBy)）")).font(.system(size: 12)).foregroundStyle(Color(hex: 0x93C5FD)).lineLimit(1)
                 }
                 Text(who).font(.system(size: 12)).foregroundStyle(PC.muted).fixedSize(horizontal: false, vertical: true) // 全員の名前を省略せず、折り返して出す
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 13).padding(.trailing, 16).padding(.top, 33)
+            .padding(.leading, 13).padding(.trailing, 16).padding(.top, 20)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
@@ -128,6 +131,7 @@ struct RoomDial: View {
         .frame(height: rowH * 3)
         .frame(maxWidth: .infinity)
         .background(DialScrollGuard())
+        .wheelRotate { dy, precise in wheel(dy, precise) }
         .contentShape(Rectangle())
         .gesture(SpatialTapGesture().onEnded { handleTap($0.location.y) })
         .background(Color(hex: 0x0F1419))
@@ -172,6 +176,15 @@ struct RoomDial: View {
                 snap(to: Int(center.rounded()), user: true)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pochiDial)) { n in // 外付けキーボード: 上下で回す / Enter で入室
+            guard !rooms.isEmpty else { return }
+            switch n.object as? String {
+            case "up": userMoved = true; snap(to: focusIndex - 1, user: true)
+            case "down": userMoved = true; snap(to: focusIndex + 1, user: true)
+            case "enter": if focusIndex >= 0 { onJoin(rooms[focusIndex].key) }
+            default: break
+            }
+        }
         .onAppear { settle(animated: false); reportFocus() }
         .onChange(of: focusIndex) { _ in reportFocus() }
         .onChange(of: rooms) { _ in settle(animated: false); reportFocus() } // 一覧の中身 (いまいる部屋の印など) が変わったとき
@@ -202,6 +215,22 @@ struct RoomDial: View {
         guard let i = best else { return }
         let nearest = Int(center.rounded()).clamped(0, rooms.count - 1)
         if i == nearest { onJoin(rooms[i].key) } else { snap(to: i, user: true) }
+    }
+
+    @State private var wheelBase: Double?
+    @State private var wheelJob: DispatchWorkItem?
+    /// Mac のスクロールホイール / トラックパッドの 2 本指スクロールで回す。止まったら、いちばん近い部屋に止める。
+    private func wheel(_ dy: CGFloat, _ precise: Bool) {
+        guard !rooms.isEmpty else { return }
+        if wheelBase == nil { wheelBase = center; userMoved = true }
+        let rows = Double(dy) / (precise ? Double(rowH) * 0.6 : 3) // ホイールは 1 目盛り ≒ 1/3 行、トラックパッドは指の動きに合わせる
+        let n = Double(max(0, rooms.count - 1))
+        center = min(n + 0.3, max(-0.3, (wheelBase ?? center) - rows))
+        wheelBase = center
+        wheelJob?.cancel()
+        let job = DispatchWorkItem { wheelBase = nil; snap(to: Int(center.rounded()), user: true) }
+        wheelJob = job
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: job)
     }
 
     private func snap(to index: Int, user: Bool) {
@@ -265,6 +294,7 @@ extension Int {
     func clamped(_ lo: Int, _ hi: Int) -> Int { Swift.min(Swift.max(self, lo), hi) }
 }
 
+#if os(iOS)
 /// ダイヤルに指が触れたら、そのあいだ、画面全体 (親の UIScrollView) のスクロールを止める。
 /// 画面がまだ慣性でスクロールしている最中に、ダイヤルを触っても、ダイヤルが負けないようにするため。
 /// (SwiftUI のジェスチャーだけでは、スクロールの慣性中のタッチは、スクロール側が先に取ってしまう)
@@ -338,3 +368,41 @@ struct DialScrollGuard: UIViewRepresentable {
         override func reset() { restore() }
     }
 }
+#else
+/// Mac: 画面全体のスクロールとダイヤルの取り合いはない (何もしない)
+struct DialScrollGuard: View { var body: some View { Color.clear } }
+#endif
+
+#if os(macOS)
+import AppKit
+/// ダイヤルの上のスクロール (ホイール / トラックパッド) を受け取る。ダイヤルの上にマウスがあるときだけ、受け取って、外側のスクロールには渡さない。
+struct WheelCatcher: NSViewRepresentable {
+    let onWheel: (CGFloat, Bool) -> Void
+    func makeNSView(context: Context) -> CatcherView { let v = CatcherView(); v.onWheel = onWheel; return v }
+    func updateNSView(_ v: CatcherView, context: Context) { v.onWheel = onWheel }
+
+    final class CatcherView: NSView {
+        var onWheel: ((CGFloat, Bool) -> Void)?
+        private var monitor: Any?
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+                guard let self, let w = self.window, e.window === w else { return e }
+                let p = self.convert(e.locationInWindow, from: nil)
+                guard self.bounds.contains(p) else { return e }
+                // 横向きのスクロールは通す。縦の動きだけダイヤルを回す
+                if abs(e.scrollingDeltaX) > abs(e.scrollingDeltaY) { return e }
+                self.onWheel?(e.scrollingDeltaY, e.hasPreciseScrollingDeltas)
+                return nil
+            }
+        }
+        deinit { if let m = monitor { NSEvent.removeMonitor(m) } }
+    }
+}
+extension View { func wheelRotate(_ f: @escaping (CGFloat, Bool) -> Void) -> some View { background(WheelCatcher(onWheel: f)) } }
+#else
+extension View { func wheelRotate(_ f: @escaping (CGFloat, Bool) -> Void) -> some View { self } }
+#endif

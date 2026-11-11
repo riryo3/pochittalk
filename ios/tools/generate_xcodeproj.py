@@ -42,13 +42,14 @@ def collect(folder):
 
 app_files = collect("Pochitalk")
 test_files = collect("PochitalkTests")
+mac_files = collect("PochitalkMac")   # Mac 専用 (Info.plist / entitlements / アイコン)
 SRC_EXT = (".swift",)
 
 objs = []
 def add(i, body): objs.append((i, body))
 
 refs = {}      # path -> fileref id
-for p in app_files + test_files:
+for p in app_files + test_files + mac_files:
     refs[p] = uid("ref:" + p)
 
 def ftype(p):
@@ -75,12 +76,13 @@ def group_files(files):
 
 app_tops = group_files(app_files)
 test_tops = group_files(test_files)
-for t in app_tops + test_tops:
+mac_tops = group_files(mac_files)
+for t in app_tops + test_tops + mac_tops:
     refs[t] = uid("ref:" + t)
 
 # ---- ファイル参照とビルドファイル
 build_src, build_res, test_src = [], [], []
-for t in app_tops + test_tops:
+for t in app_tops + test_tops + mac_tops:
     add(refs[t], '{isa = PBXFileReference; lastKnownFileType = %s; name = "%s"; path = "%s"; sourceTree = SOURCE_ROOT; }' % (ftype(t), os.path.basename(t), t))
 for t in app_tops:
     if t.endswith(".swift"):
@@ -91,6 +93,19 @@ for t in test_tops:
     if t.endswith(".swift"):
         b = uid("build:" + t); test_src.append(b); add(b, '{isa = PBXBuildFile; fileRef = %s; }' % refs[t])
 
+# Mac: iOS と同じソースを共有し、Mac 専用のアセットは PochitalkMac/ から
+IOS_ONLY_ASSETS = (os.path.join("Pochitalk", "Assets.xcassets"),)
+mac_src, mac_res = [], []
+for t in app_tops:
+    if t.endswith(".swift"):
+        b = uid("mbuild:" + t); mac_src.append(b); add(b, '{isa = PBXBuildFile; fileRef = %s; }' % refs[t])
+for t in mac_tops:
+    if t.endswith(".xcassets"):
+        b = uid("mbuild:" + t); mac_res.append(b); add(b, '{isa = PBXBuildFile; fileRef = %s; }' % refs[t])
+    elif t.endswith(".swift"):
+        b = uid("mbuild:" + t); mac_src.append(b); add(b, '{isa = PBXBuildFile; fileRef = %s; }' % refs[t])
+mac_ref = uid("product:mac")
+add(mac_ref, '{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pochitalk.app; sourceTree = BUILT_PRODUCTS_DIR; }')
 app_ref = uid("product:app"); test_ref = uid("product:test")
 add(app_ref, '{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pochitalk.app; sourceTree = BUILT_PRODUCTS_DIR; }')
 add(test_ref, '{isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PochitalkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; }')
@@ -100,7 +115,7 @@ pkg_ref_ids, prod_dep, prod_build = {}, {}, {}
 for name, url, ver, prod in PKGS:
     rid = uid("pkg:" + name); pkg_ref_ids[name] = rid
     add(rid, '{isa = XCRemoteSwiftPackageReference; repositoryURL = "%s"; requirement = {kind = exactVersion; version = %s; }; }' % (url, ver))
-    for tgt in ("app", "test"):
+    for tgt in ("app", "test", "mac"):
         did = uid("dep:%s:%s" % (tgt, name)); prod_dep[(tgt, name)] = did
         add(did, '{isa = XCSwiftPackageProductDependency; package = %s; productName = %s; }' % (rid, prod))
         bid = uid("depbuild:%s:%s" % (tgt, name)); prod_build[(tgt, name)] = bid
@@ -114,6 +129,9 @@ def phase(isa, key, files):
 app_src_ph = phase("PBXSourcesBuildPhase", "ph:app:src", build_src)
 app_res_ph = phase("PBXResourcesBuildPhase", "ph:app:res", build_res)
 app_fw_ph = phase("PBXFrameworksBuildPhase", "ph:app:fw", [prod_build[("app", n)] for n, *_ in PKGS])
+mac_src_ph = phase("PBXSourcesBuildPhase", "ph:mac:src", mac_src)
+mac_res_ph = phase("PBXResourcesBuildPhase", "ph:mac:res", mac_res)
+mac_fw_ph = phase("PBXFrameworksBuildPhase", "ph:mac:fw", [prod_build[("mac", n)] for n, *_ in PKGS])
 test_src_ph = phase("PBXSourcesBuildPhase", "ph:test:src", test_src)
 test_fw_ph = phase("PBXFrameworksBuildPhase", "ph:test:fw", [prod_build[("test", "secp256k1")]])
 test_res_ph = phase("PBXResourcesBuildPhase", "ph:test:res", [])
@@ -123,8 +141,10 @@ main_group = uid("group:main"); prod_group = uid("group:products")
 app_group = uid("group:app"); test_group = uid("group:test")
 add(app_group, '{isa = PBXGroup; children = (%s); name = Pochitalk; sourceTree = SOURCE_ROOT; }' % ", ".join(refs[t] for t in app_tops))
 add(test_group, '{isa = PBXGroup; children = (%s); name = PochitalkTests; sourceTree = SOURCE_ROOT; }' % ", ".join(refs[t] for t in test_tops))
-add(prod_group, '{isa = PBXGroup; children = (%s, %s); name = Products; sourceTree = "<group>"; }' % (app_ref, test_ref))
-add(main_group, '{isa = PBXGroup; children = (%s, %s, %s); sourceTree = "<group>"; }' % (app_group, test_group, prod_group))
+mac_group = uid("group:mac")
+add(mac_group, '{isa = PBXGroup; children = (%s); name = PochitalkMac; sourceTree = SOURCE_ROOT; }' % ", ".join(refs[t] for t in mac_tops))
+add(prod_group, '{isa = PBXGroup; children = (%s, %s, %s); name = Products; sourceTree = "<group>"; }' % (app_ref, test_ref, mac_ref))
+add(main_group, '{isa = PBXGroup; children = (%s, %s, %s, %s); sourceTree = "<group>"; }' % (app_group, test_group, mac_group, prod_group))
 
 # ---- 設定
 def cfg(key, name, settings):
@@ -172,6 +192,22 @@ test_settings = {
 test_dbg = cfg("test:debug", "Debug", test_settings); test_rel = cfg("test:release", "Release", test_settings)
 test_list = cfglist("test:list", [test_dbg, test_rel])
 
+mac_settings = {
+    "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon", "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
+    "CODE_SIGN_ENTITLEMENTS": "PochitalkMac/Pochitalk.entitlements", "CODE_SIGN_STYLE": "Automatic",
+    "CURRENT_PROJECT_VERSION": BUILD, "MARKETING_VERSION": VERSION,
+    "INFOPLIST_FILE": "PochitalkMac/Info.plist", "GENERATE_INFOPLIST_FILE": "NO",
+    "LD_RUNPATH_SEARCH_PATHS": '"$(inherited) @executable_path/../Frameworks"',
+    "PRODUCT_BUNDLE_IDENTIFIER": APP_BUNDLE_ID, "PRODUCT_NAME": "Pochitalk", "SDKROOT": "macosx", "SUPPORTED_PLATFORMS": "macosx",
+    "MACOSX_DEPLOYMENT_TARGET": "14.0", "ENABLE_HARDENED_RUNTIME": "YES", "SWIFT_EMIT_LOC_STRINGS": "YES",
+    "COMBINE_HIDPI_IMAGES": "YES", "SWIFT_OBJC_BRIDGING_HEADER": "PochitalkMac/Pochitalk-Bridging-Header.h",
+}
+if TEAM: mac_settings["DEVELOPMENT_TEAM"] = TEAM
+mac_dbg = cfg("mac:debug", "Debug", mac_settings); mac_rel = cfg("mac:release", "Release", mac_settings)
+mac_list = cfglist("mac:list", [mac_dbg, mac_rel])
+mac_t = uid("target:mac")
+add(mac_t, '{isa = PBXNativeTarget; buildConfigurationList = %s; buildPhases = (%s, %s, %s); buildRules = (); dependencies = (); name = PochitalkMac; packageProductDependencies = (%s); productName = PochitalkMac; productReference = %s; productType = "com.apple.product-type.application"; }'
+    % (mac_list, mac_src_ph, mac_fw_ph, mac_res_ph, ", ".join(prod_dep[("mac", n)] for n, *_ in PKGS), mac_ref))
 app_t = uid("target:app"); test_t = uid("target:test")
 add(app_t, '{isa = PBXNativeTarget; buildConfigurationList = %s; buildPhases = (%s, %s, %s); buildRules = (); dependencies = (); name = Pochitalk; packageProductDependencies = (%s); productName = Pochitalk; productReference = %s; productType = "com.apple.product-type.application"; }'
     % (app_list, app_src_ph, app_fw_ph, app_res_ph, ", ".join(prod_dep[("app", n)] for n, *_ in PKGS), app_ref))
@@ -181,8 +217,8 @@ add(dep_t, '{isa = PBXTargetDependency; target = %s; targetProxy = %s; }' % (app
 add(test_t, '{isa = PBXNativeTarget; buildConfigurationList = %s; buildPhases = (%s, %s, %s); buildRules = (); dependencies = (%s); name = PochitalkTests; packageProductDependencies = (%s); productName = PochitalkTests; productReference = %s; productType = "com.apple.product-type.bundle.unit-test"; }'
     % (test_list, test_src_ph, test_fw_ph, test_res_ph, dep_t, prod_dep[("test", "secp256k1")], test_ref))
 
-add(uid("project"), '{isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2700; LastUpgradeCheck = 2700; }; buildConfigurationList = %s; compatibilityVersion = "Xcode 14.0"; developmentRegion = ja; hasScannedForEncodings = 0; knownRegions = (ja, en, Base); mainGroup = %s; packageReferences = (%s); productRefGroup = %s; projectDirPath = ""; projectRoot = ""; targets = (%s, %s); }'
-    % (proj_list, main_group, ", ".join(pkg_ref_ids.values()), prod_group, app_t, test_t))
+add(uid("project"), '{isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2700; LastUpgradeCheck = 2700; }; buildConfigurationList = %s; compatibilityVersion = "Xcode 14.0"; developmentRegion = ja; hasScannedForEncodings = 0; knownRegions = (ja, en, Base); mainGroup = %s; packageReferences = (%s); productRefGroup = %s; projectDirPath = ""; projectRoot = ""; targets = (%s, %s, %s); }'
+    % (proj_list, main_group, ", ".join(pkg_ref_ids.values()), prod_group, app_t, test_t, mac_t))
 
 # ---- 出力
 sections = {}
@@ -228,4 +264,22 @@ scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
 </Scheme>
 '''
 open(os.path.join(sd, "Pochitalk.xcscheme"), "w").write(scheme)
+mscheme = f'''<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion = "2700" version = "1.7">
+   <BuildAction parallelizeBuildables = "YES" buildImplicitDependencies = "YES">
+      <BuildActionEntries>
+         <BuildActionEntry buildForTesting = "NO" buildForRunning = "YES" buildForProfiling = "YES" buildForArchiving = "YES" buildForAnalyzing = "YES">
+            <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "{mac_t}" BuildableName = "Pochitalk.app" BlueprintName = "PochitalkMac" ReferencedContainer = "container:Pochitalk.xcodeproj"/>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <LaunchAction buildConfiguration = "Debug" selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle = "0" useCustomWorkingDirectory = "NO" ignoresPersistentStateOnLaunch = "NO" debugDocumentVersioning = "YES" debugServiceExtension = "internal" allowLocationSimulation = "YES">
+      <BuildableProductRunnable runnableDebuggingMode = "0">
+         <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "{mac_t}" BuildableName = "Pochitalk.app" BlueprintName = "PochitalkMac" ReferencedContainer = "container:Pochitalk.xcodeproj"/>
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ArchiveAction buildConfiguration = "Release" revealArchiveInOrganizer = "YES"/>
+</Scheme>
+'''
+open(os.path.join(sd, "PochitalkMac.xcscheme"), "w").write(mscheme)
 print("wrote", d, len(app_files), "app files")

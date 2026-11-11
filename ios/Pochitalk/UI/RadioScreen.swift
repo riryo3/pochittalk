@@ -19,13 +19,20 @@ struct RadioScreen: View {
 
     /// この幅より広い画面 (iPad など) では、Web 版の広い画面と同じ 2 列にする: 左 = 本体、右 = ダイヤルと操作ボタン。
     private static let wideWidth: CGFloat = 800
+    #if os(macOS)
+    private static let isMac = true
+    #else
+    private static let isMac = false
+    #endif
 
     var body: some View {
         GeometryReader { geo in
-            let wide = geo.size.width >= Self.wideWidth
+            let wide = !Self.isMac && geo.size.width >= Self.wideWidth // Mac は、ダイヤルを左のドロワーに隠した 1 列にする
             ZStack(alignment: .leading) {
-                if wide { wideLayout(height: geo.size.height) } else { narrowLayout }
-                if ui.currentKey != nil {
+                if wide { wideLayout(height: geo.size.height) }
+                else if Self.isMac { macLayout }
+                else { narrowLayout }
+                if ui.currentKey != nil && !Self.isMac { // Mac は物理キーボードがあるので、画面のキーボードは出さない
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
                         MorseKeyboard(ui: ui)
@@ -33,18 +40,31 @@ struct RadioScreen: View {
                     }
                     .onPreferenceChange(CardHeightKey.self) { kbHeight = $0 }
                 }
-                if !wide {
+                if !wide && !Self.isMac {
                     DialDrawer(layer: .panel, ui: ui, open: $drawerOpen, focusKey: $focusKey, onJoin: { requestJoin($0) }) // 開いたドロワーは、最前面
                 }
             }
             .onChange(of: wide) { w in if w { drawerOpen = false } }
         }
-        .onChange(of: ui.currentKey) { _ in showQr = false; drawerOpen = false }
+        .onChange(of: ui.currentKey) { _ in showQr = false; closeDrawer() }
+        #if os(iOS)
+        .background(HardwareKeys { key, down in hwKey(key, down) }) // 外付け・Bluetooth キーボード
+        #endif
         .onAppear {
             if nickDraft.isEmpty { nickDraft = ui.nickname }
             if !Self.welcomeShown { Self.welcomeShown = true; showWelcome = WelcomeView.needed() } // 保存値を直接読む (起動直後は、画面の状態がまだ既定値のため)
         }
         .onChange(of: ui.nickname) { n in if nickDraft.isEmpty { nickDraft = n } }
+        .onReceive(NotificationCenter.default.publisher(for: .pochiMenu)) { n in // Mac のメニューバーから
+            switch n.object as? String {
+            case "settings": showSettings = true
+            case "dial": setDial(!drawerOpen)
+            case "new": requestNew()
+            case "leave": if ui.currentKey != nil { confirm = ConfirmRequest(title: "この部屋から退出しますか？", message: "", okLabel: "退出") { engine.leave() } }
+            case "reconnect": if ui.currentKey != nil { engine.reconnect() }
+            default: break
+            }
+        }
         .alert(confirm?.title ?? "", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), presenting: confirm) { c in
             Button(c.okLabel) { c.action() }
             Button("キャンセル", role: .cancel) {}
@@ -67,6 +87,8 @@ struct RadioScreen: View {
                     deviceCard(wide: false)
                     versionText
                 }
+                .frame(maxWidth: Self.isMac ? 448 : .infinity)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 2) // 左端は、ドロワーのタブが、カードに重なる
             }
             .scrollDismissesKeyboardCompat()
@@ -81,6 +103,136 @@ struct RadioScreen: View {
             DialDrawer(layer: .tab, ui: ui, open: $drawerOpen, focusKey: $focusKey) // タブは、キーボードより下
         }
     }
+
+    #if os(iOS)
+    @State private var hwSpaceDown = false
+
+    /// 外付けキーボード (Mac 版のキー操作と同じ考え)。処理したら true。
+    /// ・ダイヤルが開いているとき: ↑↓ で回す / Enter で入室 / Esc で閉じる
+    /// ・入室中: スペースを押している間だけ話す / 文字キー = モールス / 「fax」で FAX モード (Enter 送信・Backspace 消す・Tab 送り方・Esc 解除) / Esc = モールスで ESC
+    private func hwKey(_ key: UIKey, _ down: Bool) -> Bool {
+        if !key.modifierFlags.intersection([.command, .control, .alternate]).isEmpty { return false } // ⌘ などは、システムに任せる
+        if showSettings || showAbout || showWelcome || confirm != nil { return false }
+        let code = key.keyCode
+        if showQr { // QR の裏が出ているとき: Esc で表に戻すだけ
+            if down && code == .keyboardEscape { toggleQr(); return true }
+            return false
+        }
+        if drawerOpen {
+            guard down else { return false }
+            switch code {
+            case .keyboardUpArrow: NotificationCenter.default.post(name: .pochiDial, object: "up"); return true
+            case .keyboardDownArrow: NotificationCenter.default.post(name: .pochiDial, object: "down"); return true
+            case .keyboardReturnOrEnter, .keypadEnter: NotificationCenter.default.post(name: .pochiDial, object: "enter"); return true
+            case .keyboardEscape: withAnimation(.easeOut(duration: 0.25)) { drawerOpen = false }; return true
+            default: return false
+            }
+        }
+        guard ui.currentKey != nil else { return false }
+        let fax = ui.faxCompose != nil
+        if code == .keyboardSpacebar || key.characters == " " {
+            if fax { if down { engine.morseKey(" ") }; return true } // FAX モードでは、スペースは空白
+            if down { if !hwSpaceDown { hwSpaceDown = true; engine.pttPress() } }
+            else if hwSpaceDown { hwSpaceDown = false; engine.pttRelease() }
+            return true
+        }
+        guard down else { return false }
+        let morse: String
+        switch code {
+        case .keyboardDeleteOrBackspace: morse = "BS"
+        case .keyboardReturnOrEnter, .keypadEnter: morse = "ENTER"
+        case .keyboardEscape: morse = "ESC"
+        case .keyboardTab: if !fax { return false }; morse = "TAB"
+        default:
+            if fax { // FAX モード: 大文字・小文字・記号を、打ったとおりに
+                guard var c = key.characters.first, let a = c.asciiValue, a >= 0x21, a <= 0x7E else { return false }
+                if c.isLetter, let base = key.charactersIgnoringModifiers.first { // 大文字・小文字は、Shift の有無で決める
+                    c = key.modifierFlags.contains(.shift) ? Character(base.uppercased()) : Character(base.lowercased())
+                }
+                morse = String(c)
+            } else {
+                guard let c = key.characters.uppercased().first, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,?!/-:".contains(c) else { return false }
+                morse = String(c)
+            }
+        }
+        engine.morseKey(morse)
+        return true
+    }
+    #endif
+
+    // ================================================================ Mac: ダイヤルを、ウィンドウの横に付けるドロワーにする
+
+    @State private var dialSide: DialSide = .left
+    @State private var pinned = false
+    private static let dialWidth: CGFloat = 380
+
+    private func closeDrawer() {
+        #if os(macOS)
+        if drawerOpen { setDial(false) }
+        #else
+        drawerOpen = false
+        #endif
+    }
+
+    private func setDial(_ open: Bool) {
+        #if os(macOS)
+        guard open != drawerOpen else { return }
+        if open { dialSide = MacWindow.pickSide(extra: Self.dialWidth) }
+        MacWindow.resize(open: open, side: dialSide, extra: Self.dialWidth)
+        drawerOpen = open
+        MacWindow.dialOpen = open
+        #endif
+    }
+
+    #if os(macOS)
+    /// Mac: 左 (なければ右) にダイヤルのカードが付く。ウィンドウごと、その分だけ広がる。本体のカードは動かない。
+    private var macLayout: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if !drawerOpen { Spacer(minLength: 0) }
+            if drawerOpen && dialSide == .left { macDialCard }
+            ZStack(alignment: dialSide == .left ? .leading : .trailing) {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        deviceCard(wide: false)
+                        versionText
+                    }
+                    .background(GeometryReader { g in Color.clear.preference(key: MacContentHeightKey.self, value: g.size.height) })
+                    .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 8)
+                }
+                .scrollBounceIfNeeded()
+                MacDialTab(side: dialSide, open: drawerOpen) { setDial(!drawerOpen) } // 開いていても、同じ場所に出す
+                    .frame(maxHeight: .infinity)
+            }
+            .frame(width: 448) // 開く途中でも、本体は伸び縮みしない
+            if drawerOpen && dialSide == .right { macDialCard }
+            if !drawerOpen { Spacer(minLength: 0) }
+        }
+        .onPreferenceChange(MacContentHeightKey.self) { h in MacWindow.fit(contentHeight: h + 14) }
+        .onAppear { pinned = MacWindow.pinned; refreshDialSide() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMoveNotification)) { _ in refreshDialSide() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeScreenNotification)) { _ in refreshDialSide() }
+    }
+
+    /// 閉じているあいだ、左に余裕がなければ、すぐ右側にタブを移す (ウィンドウを動かすたびに見直す)
+    private func refreshDialSide() {
+        guard !drawerOpen else { return }
+        let s = MacWindow.pickSide(extra: Self.dialWidth)
+        if s != dialSide { dialSide = s }
+    }
+
+    private var macDialCard: some View {
+        VStack(spacing: 8) {
+            DialPanel(ui: ui, focusKey: $focusKey, onJoin: { requestJoin($0) }, showDetail: false)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(width: Self.dialWidth)
+        .frame(maxHeight: .infinity)
+        .background(PC.card)
+    }
+    #else
+    private var macLayout: some View { EmptyView() }
+    #endif
 
     /// iPad など広い画面 (Web 版の広い画面と同じ): 2 列のカードを、画面の中央に置く。
     /// 左 = 本体のカード / 右 = ダイヤルのカード、その下に、操作ボタン (入室中) またはハンドルネームと設定 (入室前) のカード。
@@ -111,7 +263,7 @@ struct RadioScreen: View {
 
     /// QR の裏返し: 約 0.2 秒で 90° 回って入れ替わり、0.22 秒で戻る (合わせて約 0.42 秒)。「動きを減らす」のときは、アニメーションなし。
     private func toggleQr() {
-        if UIAccessibility.isReduceMotionEnabled { showQr.toggle() }
+        if reduceMotionOn { showQr.toggle() }
         else { withAnimation(.easeInOut(duration: 0.42)) { showQr.toggle() } }
     }
     @State private var kbHeight: CGFloat = 0
@@ -148,6 +300,13 @@ struct RadioScreen: View {
                 .buttonStyle(SubButtonStyle(small: !fill)).disabled(ui.reconnecting)
             Button { confirm = ConfirmRequest(title: "この部屋から退出しますか？", message: "", okLabel: "退出") { engine.leave() } } label: { Text("退出").frame(maxWidth: fill ? .infinity : nil) }
                 .buttonStyle(SubButtonStyle(small: !fill)).disabled(key == nil)
+            #if os(macOS)
+            if !fill {
+                Button { pinned.toggle(); MacWindow.setPinned(pinned) } label: { Text("📌").opacity(pinned ? 1 : 0.45) }
+                    .buttonStyle(SubButtonStyle(container: pinned ? Color(hex: 0x1E3A8A) : PC.chip, small: true))
+                    .help(pinned ? "最前面に表示中（クリックで解除）" : "最前面に表示する")
+            }
+            #endif
         }
     }
 
@@ -181,9 +340,8 @@ struct RadioScreen: View {
                 Spacer(minLength: 0)
                 if let key, !wide { footer(key) }
             }
+            .frame(maxHeight: .infinity, alignment: .top) // 表と同じ高さいっぱいに
         }
-        .fixedSize(horizontal: false, vertical: true) // 縦に広がらない (広い画面で、表が中央にずれないように)
-        .frame(minHeight: frontHeight > 0 ? frontHeight : nil) // 表と同じ高さ (表の高さが、最低の高さ)
     }
 
     /// 入室前に、液晶に出す部屋 (招待された部屋、なければダイヤルの赤い線の部屋)。
@@ -245,7 +403,7 @@ struct RadioScreen: View {
         if let room, room.count >= PochiEngine.maxRoom { engine.join(key); return } // 「この部屋は満員です」を出す
         var msg = formatKey(key) + ((room?.count ?? 0) > 0 ? "（いま \(room!.count) 人）" : "")
         if ui.currentKey != nil { msg += "\nいまの部屋からは退出します。" }
-        confirm = ConfirmRequest(title: "この部屋に入室しますか？", message: msg, okLabel: "入室") { drawerOpen = false; engine.join(key) }
+        confirm = ConfirmRequest(title: "この部屋に入室しますか？", message: msg, okLabel: "入室") { closeDrawer(); engine.join(key) }
     }
 
     private func requestNew(clearPending: Bool = false) {
@@ -302,20 +460,33 @@ private struct DisplayPanel: View {
     /// 入室前に出す部屋 (招待された部屋 / ダイヤルの赤い線の部屋)
     let shown: RoomInfo?
     let meter: MeterState
+    #if os(macOS)
+    private let roomHashSize: CGFloat = 26 // Mac は、部屋のアドレスを小さめに (色はそのまま)
+    #else
+    private let roomHashSize: CGFloat = 38
+    #endif
 
     var body: some View {
         VStack(spacing: 12) {
             VStack(spacing: 2) {
                 Text(key != nil ? "ROOM HASH" : ui.pendingKey != nil ? "招待された部屋" : "ダイヤルの部屋").font(.system(size: 12, design: .monospaced)).tracking(3).foregroundStyle(PC.muted)
-                Text(key.map(formatKey) ?? shown.map { formatKey($0.key) } ?? "----·----").font(.system(size: 38, weight: .black, design: .monospaced)).foregroundStyle(PC.sky)
+                Text(key.map(formatKey) ?? shown.map { formatKey($0.key) } ?? "----·----").font(.system(size: roomHashSize, weight: .black, design: .monospaced)).foregroundStyle(PC.sky)
                     .minimumScaleFactor(0.6).lineLimit(1)
+                if let k = key ?? shown?.key {
+                    let at = ui.rooms.first { $0.key == k }?.openAt ?? 0
+                    TimelineView(.periodic(from: .now, by: 15)) { tl in
+                        let t = openLabel(k, at, now: Int(tl.date.timeIntervalSince1970 * 1000))
+                        Text(t.isEmpty ? " " : t).font(.system(size: 12)).foregroundStyle(PC.muted).frame(maxWidth: .infinity).lineLimit(1)
+                    }.frame(height: 16)
+                }
                 if let c = ui.faxCompose {
-                    Text(c.isEmpty ? "FAXモード: 文字を打って ⏎ で送信（ESCで終了）" : c + "▌")
+                    Text(c.isEmpty ? "FAX[\(ui.faxAnalog ? "完全アナログ" : "アナログライクデジタル")] 文字を打って ⏎ で送信（ESCで終了）" : c + "▌")
                         .font(.system(size: 12, design: c.isEmpty ? .default : .monospaced)).foregroundStyle(c.isEmpty ? PC.muted : PC.sky)
                         .multilineTextAlignment(.center).lineLimit(1).frame(height: 18)
                 } else {
-                    Text(ui.flash ?? (ui.rxText.isEmpty ? " " : ui.rxText)).font(.system(size: 12, design: ui.flash == nil && !ui.rxText.isEmpty ? .monospaced : .default))
-                    .foregroundStyle(ui.flash == nil && !ui.rxText.isEmpty ? PC.sky : PC.muted).multilineTextAlignment(.center)
+                    let queued = ui.flash == nil && ui.rxText.isEmpty && (!ui.morseText.isEmpty || !ui.morseSent.isEmpty)
+                    Text(ui.flash ?? (ui.rxText.isEmpty ? (queued ? (ui.morseSent.isEmpty ? "送信待ち " + ui.morseText : "送信中 " + ui.morseSent + (ui.morseText.isEmpty ? "" : "｜" + ui.morseText)) : " ") : ui.rxText)).font(.system(size: 12, design: ui.flash == nil && (!ui.rxText.isEmpty || queued) ? .monospaced : .default))
+                    .foregroundStyle(ui.flash == nil && (!ui.rxText.isEmpty || queued) ? PC.sky : PC.muted).multilineTextAlignment(.center)
                     .lineLimit(1).frame(height: 18)
                 }
                 if let paper = ui.faxPaper { FaxPaperView(paper: paper) }
@@ -580,6 +751,9 @@ private struct PttSection: View {
             VStack(spacing: 2) {
                 Text("PUSH").font(.system(size: 21, weight: .black)).foregroundStyle(.white)
                 Text("TO TALK").font(.system(size: 12)).tracking(2).foregroundStyle(.white.opacity(0.85))
+                #if os(macOS)
+                Text("スペースキー").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+                #endif
             }
         }
         .frame(width: circle, height: circle)

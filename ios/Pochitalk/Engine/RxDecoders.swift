@@ -174,6 +174,7 @@ final class FaxReceiver {
 
     /// 紙を隠す (「ESC」を受けたとき、退室したとき)。
     func hide() {
+        audioActive = false
         pages.values.forEach { $0.cancel() }
         pages = [:]
         onPaper?(nil)
@@ -189,13 +190,67 @@ final class FaxReceiver {
     }
 
     func process(_ b: ToneMeter.Block) {
+        if audioActive { audioStep(b); return }
         if b.fax == 1 {
             preCount += 1
             if preCount >= 8 { // 120ms以上のピー: 受信開始の合図
                 preCount = 0
-                for (id, p) in pages where !p.started { start(id, p, delay: 500) }
+                if pages.isEmpty { beginAudio(b) } // データ便が来ていない (おうむ返しなど、音だけ) ときは、音を読み取って描く
+                else { for (id, p) in pages where !p.started { start(id, p, delay: 500) } }
             }
         } else { preCount = 0 }
+    }
+
+    // ---- 音だけの FAX (データ便なし): トーンの並びから、紙を描く。
+    // 送信側の進行表: ピー(1500) → 各行 [同期(900) 150ms → 白(1300)/黒(2100) を 1 ピクセル 20ms で並べる (空行は白 80ms)]。最初の行は余白。
+    private var audioActive = false
+    private var curTone: UInt8 = 0
+    private var segStart = 0.0
+    private var lastT = 0.0
+    private var rowY = -1
+    private var rowT0: Double?
+    private var silentBlocks = 0
+    private var cur = [UInt8](repeating: 0, count: FaxPaper.cols)
+
+    private func beginAudio(_ b: ToneMeter.Block) {
+        audioActive = true
+        paper = FaxPaper()
+        onPaper?(paper)
+        curTone = 1; segStart = b.t; lastT = b.t
+        rowY = -1; rowT0 = nil; silentBlocks = 0
+        cur = [UInt8](repeating: 0, count: FaxPaper.cols)
+    }
+
+    private func audioStep(_ b: ToneMeter.Block) {
+        lastT = b.t
+        let tone = b.fax
+        if tone == 0 {
+            silentBlocks += 1
+            if silentBlocks >= 40 { finishAudio() } // 0.6 秒の無音で、受信おわり
+            return
+        }
+        silentBlocks = 0
+        if tone == curTone { return }
+        closeSegment(end: b.t)
+        if tone == 2 { rowY += 1; rowT0 = nil; cur = [UInt8](repeating: 0, count: FaxPaper.cols) } // 同期: 次の行へ (音のズレは、そのまま絵に出す)
+        else if (tone == 3 || tone == 4) && curTone == 2 { rowT0 = b.t } // 同期のあと、最初の白/黒: 行のデータの始まり
+        curTone = tone; segStart = b.t
+    }
+
+    private func closeSegment(end: Double) {
+        guard (curTone == 3 || curTone == 4), let t0 = rowT0, rowY >= 0, rowY < FaxPaper.rows else { return }
+        if curTone == 4 {
+            let x0 = max(0, Int(((segStart - t0) / Self.pxMs).rounded())), x1 = min(FaxPaper.cols, Int(((end - t0) / Self.pxMs).rounded()))
+            if x1 > x0 { for x in x0..<x1 { cur[x] = 1 } }
+        }
+        for x in 0..<FaxPaper.cols { paper.pixels[rowY * FaxPaper.cols + x] = cur[x] }
+        onPaper?(paper)
+    }
+
+    private func finishAudio() {
+        closeSegment(end: lastT - Double(silentBlocks) * ToneMeter.blockMs)
+        audioActive = false
+        curTone = 0
     }
 
     private func start(_ peerId: String, _ page: Page, delay: Int) {
