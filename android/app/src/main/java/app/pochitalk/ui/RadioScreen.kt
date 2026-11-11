@@ -99,7 +99,7 @@ fun RadioScreen(state: UiState, rawActions: Actions, onOpenRooms: () -> Unit, mo
         Actions(
             join = { k ->
                 val r = state.rooms.firstOrNull { it.key == k }
-                if (k == key || (r != null && r.count >= 8 && !r.isCurrent)) rawActions.join(k) // すでにいる部屋・満員は、確認の前にエンジンが知らせる
+                if (k == key || (r != null && r.count >= app.pochitalk.engine.PochiEngine.MAX_ROOM && !r.isCurrent)) rawActions.join(k) // すでにいる部屋・満員は、確認の前にエンジンが知らせる
                 else confirm = Confirm.Join(k, r?.count ?: 0)
             },
             create = { confirm = Confirm.New },
@@ -116,6 +116,15 @@ fun RadioScreen(state: UiState, rawActions: Actions, onOpenRooms: () -> Unit, mo
     val showSticky by remember { derivedStateOf { key != null && scroll.value > with(density) { 220.dp.toPx() } } }
     // 部屋に入ったら、引き出しは閉じる
     LaunchedEffect(key) { drawerOpen = false }
+    // 外付けキーボード: 引き出しの開閉状態を伝え、Esc で閉じる
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(drawerOpen) {
+        HardKeys.drawerOpen = drawerOpen
+        if (!drawerOpen) focusManager.clearFocus(force = true) // 引き出しを閉じたら、入力欄のフォーカスを外す
+    }
+    LaunchedEffect(Unit) { focusManager.clearFocus(force = true) } // 起動直後に、検索欄などへ勝手にフォーカスが入らないように
+    LaunchedEffect(Unit) { HardKeys.closeDrawer.collect { drawerOpen = false } }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { HardKeys.drawerOpen = false } }
     Box(modifier) {
         Column(
             Modifier
@@ -145,7 +154,7 @@ fun RadioScreen(state: UiState, rawActions: Actions, onOpenRooms: () -> Unit, mo
         }
         // 部屋を探すダイヤルは、Web版 (狭い画面) と同じく、左端から出る引き出しに入れる
         RoomDrawer(open = drawerOpen, onOpen = { drawerOpen = true }, onClose = { drawerOpen = false }) {
-            RoomListCard(state, { drawerOpen = false; actions.join(it) }, showReconnect = key == null, onCenter = { centerKey = it })
+            RoomListCard(state, { drawerOpen = false; actions.join(it) }, showReconnect = key == null, onCenter = { centerKey = it }, canFocus = drawerOpen)
         }
         confirm?.let { c ->
             val inRoom = key != null
@@ -317,6 +326,7 @@ private fun DisplayPanel(state: UiState, key: String, meter: MeterState) {
                 fontWeight = FontWeight.Black,
                 fontSize = 38.sp,
             )
+            ElapsedLine(state.rooms.firstOrNull { it.key == key }, 18.dp, 12.sp)
             val sub = state.flash ?: state.morseText
             val isMorse = state.flash == null && state.morseText.isNotEmpty()
             Text(
@@ -723,7 +733,7 @@ private fun MorseDrawer(state: UiState) {
             Column(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (state.faxMode) {
                     Text(
-                        if (state.faxText.isNotEmpty()) state.faxText + "▌" else "FAXモード: 文字を打って ⏎ で送信（ESCで終了）",
+                        if (state.faxText.isNotEmpty()) state.faxText + "▌" else "FAX[" + (if (state.faxAnalog) "完全アナログ" else "アナログライクデジタル") + "]: 文字を打って ⏎ で送信（ESCで終了）",
                         color = if (state.faxText.isNotEmpty()) PochiColors.Amber else PochiColors.Muted,
                         fontFamily = FontFamily.Monospace, fontSize = 14.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
@@ -736,7 +746,10 @@ private fun MorseDrawer(state: UiState) {
                         r.forEach { c -> MorseKey(c.toString(), c.toString(), Modifier.weight(1f)) }
                         if (ri == 3) MorseKey("⌫", "BS", Modifier.weight(1.6f))
                         if (ri == 4) {
-                            if (state.faxMode) MorseKey("⏎", "ENTER", Modifier.weight(1.6f), Color(0xFF1D4ED8))
+                            if (state.faxMode) {
+                                MorseKey("送り方", "MODE", Modifier.weight(2f), Color(0xFF4B5563))
+                                MorseKey("⏎", "ENTER", Modifier.weight(1.6f), Color(0xFF1D4ED8))
+                            }
                         }
                     }
                 }

@@ -11,6 +11,8 @@ struct RoomInfo: Identifiable, Equatable {
     /// 話題タグと、付けた人の名前 (なければ空)。
     var tag = ""
     var tagBy = ""
+    /// 部屋を開いた時刻 (エポック ms。0=不明・無人)
+    var openAt = 0
     var id: String { key }
 }
 
@@ -73,6 +75,10 @@ struct UiState: Equatable {
     var rxText = ""
     /// モールスの送信待ちの文字 (キーボードの見出しに出す)
     var morseText = ""
+    /// FAX の送り方: true = 完全アナログ / false = アナログライクデジタル
+    var faxAnalog = false
+    /// いま送っているモールスの文字 (送り終えた分)。送信が終わると消える
+    var morseSent = ""
     /// FAX モードで打っている文字 (FAX モードでなければ nil)
     var faxCompose: String?
     /// 自動で再接続する (標準はオフ。手動の「再接続」ボタンは、オフでも使える)。
@@ -93,6 +99,21 @@ struct UiState: Equatable {
 }
 
 enum MicPermission { case undetermined, granted, denied }
+
+/// 部屋を開いてからの経過 (Web 版 fmtElapsed と同じ)
+func fmtElapsed(_ openAt: Int, now: Int) -> String {
+    let m = max(0, (now - openAt) / 60_000)
+    if m < 1 { return "いま開いたばかり" }
+    if m < 60 { return "\(m)分" }
+    if m < 1440 { return "\(m / 60)時間\(m % 60)分" }
+    return "\(m / 1440)日\((m % 1440) / 60)時間"
+}
+
+/// 経過時間の行の文言。おうむの部屋は「♾ 常設」、無人は空欄。
+func openLabel(_ key: String, _ openAt: Int, now: Int) -> String {
+    if isBotRoom(key) { return "♾ 常設" }
+    return openAt > 0 ? "⏱ 開いてから " + fmtElapsed(openAt, now: now) : ""
+}
 
 func formatKey(_ key: String) -> String { key.prefix(4).uppercased() + "·" + key.dropFirst(4).uppercased() }
 

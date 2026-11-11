@@ -1,14 +1,23 @@
 import CoreGraphics
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#else
+import AppKit
+#endif
 
 /// FAX の送信用: 文字を、14 行の白黒の絵にする (Web 版 textToFaxGrid の移植) と、データ便の中身にする (faxGridToPayload)。
 enum FaxText {
     /// 大きく描いてから縮める (小さい字を直接潰すと、線が欠けるため)。インクのある範囲だけを、14 行に写す。
     static func grid(_ text: String) -> [[Bool]] {
         let rows = FaxReceiver.textRows, maxCols = FaxPaper.cols
+        #if canImport(UIKit)
         let font = UIFont.monospacedSystemFont(ofSize: 56, weight: .bold)
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.black]
+        #else
+        let font = NSFont.monospacedSystemFont(ofSize: 56, weight: .bold)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        #endif
         let ns = text as NSString
         let w = max(1, Int(ceil(ns.size(withAttributes: attrs).width))) + 4
         let h = 84 // 上下に余裕を持たせ、g のような下へ伸びる字も切らない
@@ -17,9 +26,16 @@ enum FaxText {
             guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
                                       space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return }
             ctx.translateBy(x: 0, y: CGFloat(h)); ctx.scaleBy(x: 1, y: -1) // 上から下へ (UIKit の向き)
+            #if canImport(UIKit)
             UIGraphicsPushContext(ctx)
             ns.draw(at: CGPoint(x: 2, y: 8), withAttributes: attrs)
             UIGraphicsPopContext()
+            #else
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
+            ns.draw(at: CGPoint(x: 2, y: 8), withAttributes: attrs)
+            NSGraphicsContext.restoreGraphicsState()
+            #endif
         }
         var minX = w, maxX = -1, minY = h, maxY = -1
         for y in 0..<h { for x in 0..<w where src[y * w + x] > 40 {

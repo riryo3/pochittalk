@@ -32,6 +32,7 @@ struct DialDrawer: View {
                         .frame(maxHeight: .infinity)
                         .accessibilityLabel("部屋を探す（ダイヤルを開く）")
                         .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { setOpen(true) }
                     Color.clear.frame(width: 38).contentShape(Rectangle())
                         .gesture(DragGesture(minimumDistance: 0).onEnded { v in
                             if v.translation.width > 24 || (abs(v.translation.width) < 10 && abs(v.translation.height) < 10) { setOpen(true) }
@@ -81,7 +82,11 @@ struct DialDrawer: View {
     }
 
     private var content: some View {
+        #if os(macOS)
+        DialPanel(ui: ui, focusKey: $focusKey, onJoin: { join($0) }, onSideSwipe: { if $0 < -60 { setOpen(false) } }, showDetail: false) // Mac: 部屋の詳細は出さない
+        #else
         DialPanel(ui: ui, focusKey: $focusKey, onJoin: { join($0) }, onSideSwipe: { if $0 < -60 { setOpen(false) } })
+        #endif
     }
 
     private func join(_ key: String) { onJoin(key) }
@@ -108,6 +113,15 @@ struct DialPanel: View {
         }
     }
 
+    /// 絞り込み欄に入れた文字が部屋の符号 (8 文字) の形で、その部屋が一覧にないとき、その符号 (部屋を作って入れる)。
+    private var typedNewKey: String? {
+        var q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        if let r = q.range(of: "r=", options: .backwards) { q = String(q[r.upperBound...]) }
+        q = q.filter { $0.isLetter || $0.isNumber }
+        guard isRoomKey(q), !ui.rooms.contains(where: { $0.key == q }) else { return nil }
+        return q
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -116,7 +130,11 @@ struct DialPanel: View {
                 Text("👤 \(ui.totalPeople)人 / \(ui.rooms.count)部屋").font(.system(size: 12, design: .monospaced)).foregroundStyle(PC.sky)
             }
             TextField("🔍 URL・ハッシュ・名前・話題で絞り込み", text: $search).pochiField().font(.system(size: 14))
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .noAutoCap()
+            if let k = typedNewKey {
+                Button { join(k) } label: { Text("「\(formatKey(k))」の部屋を作って入る").frame(maxWidth: .infinity) }
+                    .buttonStyle(SubButtonStyle())
+            }
             RoomDial(
                 rooms: filtered,
                 connected: ui.peers.count + 1, pendingKey: ui.pendingKey,

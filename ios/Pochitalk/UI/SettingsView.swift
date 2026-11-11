@@ -17,7 +17,7 @@ struct SettingsView: View {
                     case .undetermined: Button("マイクの許可をたずねる") { engine.requestMic() }
                     case .denied:
                         Text("マイクが許可されていません。").foregroundStyle(PC.amber)
-                        Button("設定アプリを開く") { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
+                        Button(openSettingsLabel) { openSystemSettings() }
                     }
                     VStack(alignment: .leading) {
                         HStack { Text("入力レベル"); Spacer(); Text("+\(ui.micGainDb) dB").font(.system(.body, design: .monospaced)).foregroundStyle(PC.sky) }
@@ -45,7 +45,7 @@ struct SettingsView: View {
                     Slider(value: Binding(get: { Double(ui.sfxVolume) }, set: { engine.setSfxVolume(Int($0.rounded())) }), in: 0...150, step: 5) { editing in
                         if !editing { engine.previewSfx() }
                     }
-                    Text("スライダーを離すと、試しに「ガッ」と鳴ります（通話中のみ）。効果音を消したいときは、音量を 0% にしてください。").font(.footnote).foregroundStyle(.secondary)
+                    Text("スライダーを離すと、試しに発話終了の「ガッ」と鳴ります。効果音を消したいときは、音量を 0% にしてください。").font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("新しい部屋") {
                     Toggle("新しい部屋ができたら、音で知らせる", isOn: Binding(get: { ui.notifyRoom }, set: { engine.setNotifyRoom($0) }))
@@ -80,13 +80,19 @@ struct SettingsView: View {
                     }
                 }
             }
+            #if os(macOS)
+            .formStyle(.grouped) // Mac: 項目ごとに枠でまとめて、ラベルと値を揃える
+            #endif
             .scrollContentBackground(.hidden)
             .background(PC.bg)
-            .navigationTitle("設定").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("設定").inlineNavTitle()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("閉じる") { dismiss() } } }
             .sheet(isPresented: $showAbout) { AboutView() }
             .onDisappear { engine.setMicTest(false) }
         }
         .preferredColorScheme(.dark)
+        #if os(macOS)
+        .frame(minWidth: 420, idealWidth: 420, minHeight: 560, idealHeight: 640)
+        #endif
     }
 }

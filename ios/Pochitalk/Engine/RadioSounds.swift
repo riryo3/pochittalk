@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// Web 版 (Web Audio API) の効果音を PCM で合成する (Android 版 RadioSounds.kt の移植)。
@@ -20,6 +21,26 @@ final class RadioSounds {
     func playTune() { play("tune", cached: false) { synthTune($0) } }
     func playNewRoom() { play("newroom", cached: true) { synthNewRoom($0) } }
     func playEnter() { play("enter", cached: true) { synthEnter($0) } }
+
+    /// 音量の試し聴き (発話終了のザラついた「ガッ」)。部屋にいるときは、通話と同じ経路で鳴らす (実際の聞こえ方)。部屋の外では、音声ユニットが止まっているので、単独で鳴らす。
+    private var previewPlayer: AVAudioPlayer?
+    func playPreview() {
+        let gain = volume
+        if gain <= 0 || device.speakerMuted { return }
+        if device.isUnitRunning { playEnd(); return }
+        let rate = 48000.0
+        let pcm = synthEnd(rate).map { Int16(max(-32767, min(32767, $0 * 32767 * gain))) }
+        var d = Data()
+        func put<T: FixedWidthInteger>(_ v: T) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        let bytes = pcm.count * 2
+        d.append(contentsOf: Array("RIFF".utf8)); put(UInt32(36 + bytes)); d.append(contentsOf: Array("WAVEfmt ".utf8))
+        put(UInt32(16)); put(UInt16(1)); put(UInt16(1)); put(UInt32(rate)); put(UInt32(rate) * 2); put(UInt16(2)); put(UInt16(16))
+        d.append(contentsOf: Array("data".utf8)); put(UInt32(bytes))
+        pcm.forEach { put($0) }
+        previewPlayer?.stop()
+        previewPlayer = try? AVAudioPlayer(data: d)
+        previewPlayer?.play()
+    }
 
     private func play(_ name: String, cached: Bool, _ synth: (Double) -> [Float]) {
         let gain = volume

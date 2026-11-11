@@ -11,7 +11,20 @@ data class RoomInfo(
     /** 話題タグと、付けた人の名前 (なければ空)。 */
     val tag: String = "",
     val tagBy: String = "",
+    /** 部屋を開いた時刻 (エポックms)。不明・無人は0。 */
+    val openAt: Long = 0L,
 )
+
+/** 経過時間の表示 (Web版の fmtElapsed)。 */
+fun fmtElapsed(ms: Long): String {
+    val m = (ms / 60_000L).coerceAtLeast(0)
+    return when {
+        m < 1 -> "いま開いたばかり"
+        m < 60 -> "${m}分"
+        m < 1440 -> "${m / 60}時間${m % 60}分"
+        else -> "${m / 1440}日${(m % 1440) / 60}時間"
+    }
+}
 
 data class PeerInfo(val id: String, val name: String, val talking: Boolean)
 
@@ -80,6 +93,8 @@ data class UiState(
     val missingNames: List<String> = emptyList(),
     /** 新しい部屋ができたら音で知らせる (初期オフ)。 */
     val notifyRoom: Boolean = false,
+    /** FAX の送り方: true=完全アナログ(音だけ) / false=アナログライクデジタル(音+データ便) */
+    val faxAnalog: Boolean = false,
     /** 通信の記録を端末に残す (初期オフ)。オンの間は名前の前に 💾 が付く。 */
     val logMode: Boolean = false,
     /** 利用上の注意に同意済みか (同意した版が、いまの版と同じ)。 */

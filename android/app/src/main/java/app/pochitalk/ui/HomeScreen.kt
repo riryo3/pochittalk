@@ -110,7 +110,7 @@ fun IdlePanel(state: UiState, centerKey: String?, meter: MeterState) {
                 if (centerKey != null) formatKey(centerKey) else "----·----",
                 color = PochiColors.Sky.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 38.sp,
             )
-            Spacer(Modifier.height(18.dp))
+            ElapsedLine(room, 18.dp, 12.sp)
             LevelMeter(meter)
         }
         val tagText = when {

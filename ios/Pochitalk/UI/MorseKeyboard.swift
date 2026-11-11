@@ -29,6 +29,7 @@ struct MorseKeyboard: View {
                             ForEach(Array(r), id: \.self) { c in key(String(c), wide: false) }
                             if ri == 3 { key("⌫", wide: true, code: "BS") }
                             if ri == 4 && ui.faxCompose != nil { key("⏎", wide: true, code: "ENTER") } // FAX モードのときだけ: 送信
+                            if ri == 4 && ui.faxCompose != nil { key("送り方", wide: true, code: "TAB") } // FAX の送り方 (完全アナログ / アナログライクデジタル)
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
@@ -70,13 +71,15 @@ struct FlipCard<Front: View, Back: View>: View, Animatable {
     }
 
     var body: some View {
-        ZStack {
-            front.opacity(angle < 90 ? 1 : 0)
-                .rotation3DEffect(.degrees(angle), axis: (0, 1, 0), perspective: 0.5)
-                .allowsHitTesting(angle < 90)
-            back.opacity(angle >= 90 ? 1 : 0)
-                .rotation3DEffect(.degrees(angle - 180), axis: (0, 1, 0), perspective: 0.5)
-                .allowsHitTesting(angle >= 90)
-        }
+        // 表が大きさを決める。裏は、表の上に重ねるだけ (大きさに影響せず、表と同じ大きさになる)
+        front.opacity(angle < 90 ? 1 : 0)
+            .rotation3DEffect(.degrees(angle), axis: (0, 1, 0), perspective: 0.5)
+            .allowsHitTesting(angle < 90)
+            .overlay(
+                back.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .opacity(angle >= 90 ? 1 : 0)
+                    .rotation3DEffect(.degrees(angle - 180), axis: (0, 1, 0), perspective: 0.5)
+                    .allowsHitTesting(angle >= 90)
+            )
     }
 }

@@ -55,7 +55,7 @@ struct WelcomeView: View {
                 }.padding(16)
             }
             .background(PC.bg)
-            .navigationTitle("ようこそ").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("ようこそ").inlineNavTitle()
             .sheet(isPresented: $showAbout) { AboutView() }
         }
         .presentationDetents([.large])

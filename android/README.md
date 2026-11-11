@@ -1,4 +1,4 @@
-# ぽちっと通話 Android版 (Kotlin / ネイティブ) — α 0.5.0
+# ぽちっと通話 Android版 (Kotlin / ネイティブ) — α 0.4.0
 
 Web版 (`../worker.js`) と**同じ部屋で相互に通話できる**ネイティブアプリです。
 Web版が使っている [Trystero](https://github.com/dmotz/trystero) **0.25.4** の nostr 方式を Kotlin で再実装しています。

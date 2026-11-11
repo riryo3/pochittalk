@@ -17,7 +17,7 @@ struct QrBackFace: View {
             }
             Group {
                 if let img = Self.qrImage(url) {
-                    Image(uiImage: img).interpolation(.none).resizable().scaledToFit()
+                    Image(platform: img).interpolation(.none).resizable().scaledToFit()
                 } else {
                     Text("QRコードを作れませんでした。招待URLの送信をお使いください。").font(.system(size: 13)).foregroundStyle(Color(hex: 0x374151))
                 }
@@ -35,13 +35,13 @@ struct QrBackFace: View {
     }
 
     /// 白地に黒の QR (周りの余白つき)。
-    static func qrImage(_ text: String) -> UIImage? {
+    static func qrImage(_ text: String) -> PlatformImage? {
         let f = CIFilter.qrCodeGenerator()
         f.message = Data(text.utf8)
         f.correctionLevel = "M"
         guard let out = f.outputImage else { return nil }
         let scaled = out.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
         guard let cg = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
-        return UIImage(cgImage: cg)
+        return PlatformImage.make(cg)
     }
 }

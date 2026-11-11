@@ -269,13 +269,14 @@ const HTML = `<!DOCTYPE html>
     .rdial { position: relative; z-index: 1; height: 100%; overflow-y: auto; padding: var(--rdial-row) 0; box-sizing: border-box; scroll-snap-type: y mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; outline: none; }
     .rdial::-webkit-scrollbar { display: none; }
     .rdial:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-color); border-radius: 14px; }
-    .rdial-item { height: var(--rdial-row); box-sizing: border-box; padding: 33px 16px 0; scroll-snap-align: center; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: flex-start; gap: 1px; cursor: pointer; color: var(--text-color); border-left: 3px solid transparent; will-change: transform, opacity; user-select: none; -webkit-user-select: none; }
+    .rdial-item { height: var(--rdial-row); box-sizing: border-box; padding: 20px 16px 0; scroll-snap-align: center; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: flex-start; gap: 1px; cursor: pointer; color: var(--text-color); border-left: 3px solid transparent; will-change: transform, opacity; user-select: none; -webkit-user-select: none; }
     .rdial-item { position: relative; transform-origin: 50% 50%; background: none; }
     /* ドラム本体は動かない（背景は固定）。部屋の文字だけが、ドラムの面に印刷されて、回る */
     .rdial-wrap::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--rdial-row); transform: translateY(-50%); pointer-events: none; z-index: 0; background: linear-gradient(180deg, rgba(148,163,184,0) 0%, rgba(148,163,184,0.07) 50%, rgba(148,163,184,0) 100%); }
     .rdial-item > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-    /* 赤い線は、1行目（部屋の番号）と、2行目（タグや名前）の、すきまを通る（1行の高さ132pxの中央＝66px。番号の高さ26px、すきま13pxのまん中が66pxになるよう、上の余白は33px） */
-    .rdial-item > div:nth-child(2) { margin-top: 12px; }
+    /* 赤い線は、1行目（部屋の番号）と、2行目（タグや名前）の、すきまを通る（1行の高さ132pxの中央＝66px。番号の高さ26px＋経過時間15px、すきま13pxのまん中が66pxになるよう、上の余白は20px） */
+    .rdial-item > div.chip-open { height: 15px; line-height: 15px; font-size: 0.7rem; color: var(--muted-color); }
+    .rdial-item > div:nth-child(3) { margin-top: 9px; }
     .rdial-item .chip-tag, .rdial-item .chip-who { margin-top: 0; max-width: 100%; font-size: 0.74rem; }
     /* 在室の人は、全員の名前を出す（長くなったら、「、」の後で折り返す。省略しない） */
     .rdial-item > div.chip-who { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
@@ -299,6 +300,14 @@ const HTML = `<!DOCTYPE html>
     .rdial-line::after { right: -2px; border-right-color: #ef4444; }
     .rdial-fade { position: absolute; left: 0; right: 0; height: 22%; pointer-events: none; z-index: 2; }
     .rdial-fade.top { top: 0; background: linear-gradient(180deg, rgba(15,20,25,.8) 0%, rgba(15,20,25,0) 100%); }
+    /* 隠しモード（?m=flatten）: 部屋を、ダイヤルではなく、全室ぶん、縦に平らに並べる */
+    body.flat .rdial-wrap { height: auto; overflow-y: auto; }
+    body.flat .rdial { height: auto; overflow: visible; padding: 4px 0; scroll-snap-type: none; }
+    body.flat .rdial-item { height: auto; min-height: 0; padding: 10px 16px 10px; scroll-snap-align: none; transform: none !important; opacity: 1 !important; filter: none !important; border-bottom: 1px solid #1f2937; }
+    body.flat .rdial-item.full { filter: grayscale(0.7) !important; }
+    body.flat .rdial-item > div:nth-child(3) { margin-top: 2px; }
+    body.flat .rdial-item > div.chip-open { height: auto; line-height: 1.4; }
+    body.flat .rdial-line, body.flat .rdial-rail, body.flat .rdial-ridges, body.flat .rdial-fade, body.flat .rdial-wrap::before { display: none; }
     .rdial-fade.bottom { bottom: 0; background: linear-gradient(0deg, rgba(15,20,25,.8) 0%, rgba(15,20,25,0) 100%); }
     .chan-chip.bot { border-color: #34d399; box-shadow: 0 0 8px rgba(52,211,153,0.35); }
     .chan-chip.full { opacity: .55; }
@@ -341,6 +350,7 @@ const HTML = `<!DOCTYPE html>
     .mono0 { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", "DejaVu Sans Mono", monospace; font-variant-numeric: slashed-zero; font-feature-settings: "zero" 1; }
     .lcd-freq.tuning { opacity: .45; animation: blink .35s steps(2) infinite; }
     @keyframes blink { 50% { opacity: .9; } }
+    .lcd-open { font-size: 0.72rem; color: var(--muted-color); line-height: 1.5; height: 1.5em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .lcd-sub { font-size: 0.72rem; color: var(--muted-color); line-height: 1.5; height: 1.5em; white-space: nowrap; overflow: hidden; } /* 日本語を出したときの高さに固定（文字によって LCD の高さが変わらないように） */
     .fax-paper { width: 100%; image-rendering: pixelated; background: #f8f8f2; border-radius: 4px; display: block; margin-top: 6px; }
     .tuner { display: flex; flex-direction: column; gap: 10px; }
@@ -529,6 +539,7 @@ const HTML = `<!DOCTYPE html>
       <div class="lcd">
         <div class="lcd-ch" id="chDisplay">ROOM HASH</div>
         <div class="lcd-freq" id="freqDisplay">----·----</div>
+        <div class="lcd-open" id="lcdOpen"></div>
         <div class="lcd-sub" id="lcdSub"></div>
         <div class="level-row"><span class="level-label" id="levelLabel">LEVEL</span><canvas class="level" id="levelCanvas" width="280" height="14"></canvas><span class="level-db" id="levelDb">-∞ dB</span></div>
       </div>
@@ -921,6 +932,7 @@ const HTML = `<!DOCTYPE html>
 
     const rxAnalysers = new Map(); // peerId -> AnalyserNode
     let sendJoinAge = null, roomEnterTime = 0;
+    let roomOpenAt = 0, pendingOpenAt = 0, openLineOp = 0; // 部屋を最初に開けた時刻（最初の人が抜けても、残った人が引き継ぐ）
     let sendTag = null, roomMeta = { tag: '', by: '', at: 0 }; // 話題タグ（誰でも上書き・新しいものが勝つ）
     let pendingRoomMeta = null; // 読み込み直しの前に付いていた話題タグ（入り直したあとに、戻す）
     let txAnalyser = null;
@@ -1474,6 +1486,8 @@ const HTML = `<!DOCTYPE html>
       roomMeta = { tag: '', by: '', at: 0 };
       if (pendingRoomMeta && pendingRoomMeta.key === key) { roomMeta = { tag: capTag(pendingRoomMeta.tag), by: String(pendingRoomMeta.by || '').slice(0, 12), at: pendingRoomMeta.at }; } // 読み込み直しで、話題タグが消えないようにする
       pendingRoomMeta = null;
+      roomOpenAt = (pendingOpenAt > 0 && pendingOpenAt <= Date.now()) ? pendingOpenAt : Date.now(); pendingOpenAt = 0;
+      try { const stO = roomStats().get(key); if (stO && stO.op > 0 && stO.op < roomOpenAt) roomOpenAt = stO.op; } catch (_) {}
       closeTagForm(); // 部屋を移ったら、開いていた編集欄は閉じる
       renderTagRow();
       const roomId = 'h-' + key;
@@ -2034,6 +2048,7 @@ const HTML = `<!DOCTYPE html>
       if (faxMode) {
         if (faxTxActive) return;
         if (e.key === 'Enter') { e.preventDefault(); if (faxText) startFaxTx(); return; }
+        if (e.key === 'Tab') { e.preventDefault(); toggleFaxAnalog(); return; }
         if (e.key === 'Backspace') { e.preventDefault(); faxText = faxText.slice(0, -1); renderFaxCompose(); return; }
         if (e.key && e.key.length === 1 && faxText.length < 24) { e.preventDefault(); faxText += e.key; renderFaxCompose(); }
         return;
@@ -2094,6 +2109,7 @@ const HTML = `<!DOCTYPE html>
       // ファックスモードのときだけ出る「送信」キー（キーボードの Enter の代わり）
       const faxRow = document.createElement('div'); faxRow.className = 'mk-row'; faxRow.style.display = 'none';
       { const sb = document.createElement('button'); sb.type = 'button'; sb.className = 'mk wide'; sb.style.flex = '1 1 auto'; sb.textContent = 'FAX 送信'; sb.dataset.k = 'SEND'; faxRow.appendChild(sb); }
+      { const mb = document.createElement('button'); mb.type = 'button'; mb.className = 'mk wide'; mb.style.flex = '1 1 auto'; mb.textContent = '送り方'; mb.dataset.k = 'MODE'; faxRow.appendChild(mb); }
       kb.appendChild(faxRow);
       handle.addEventListener('click', function () { const o = drawer.classList.toggle('open'); handle.setAttribute('aria-expanded', o ? 'true' : 'false'); document.getElementById('morseToggle').textContent = o ? '▼ 閉じる' : '▲ 開く'; });
       kb.addEventListener('pointerdown', function (e) { if (e.target.closest && e.target.closest('.mk')) e.preventDefault(); }); // 入力欄のフォーカスを奪わない
@@ -2106,6 +2122,7 @@ const HTML = `<!DOCTYPE html>
         if (faxMode) {
           if (faxTxActive) return;
           if (k === 'SEND') { if (faxText) startFaxTx(); return; }
+          if (k === 'MODE') { toggleFaxAnalog(); return; }
           if (k === 'BS') { faxText = faxText.slice(0, -1); renderFaxCompose(); return; }
           if (k.length === 1 && faxText.length < 24) { faxText += k; renderFaxCompose(); }
           return;
@@ -2123,7 +2140,7 @@ const HTML = `<!DOCTYPE html>
         }
         morseQueue.push(k); startMorse();
       });
-      setInterval(function () { faxRow.style.display = faxMode ? '' : 'none'; if (drawer.classList.contains('hidden')) return; const t = morseQueue.join('').trim(); if (faxMode) qv.textContent = 'FAX: 打った文字が紙に出ます。「FAX 送信」で送信 / ESC で終了'; else { qv.textContent = ''; if (t) { qv.appendChild(document.createTextNode('送信待ち ')); qv.appendChild(monoSpan(t)); } } }, 250);
+      setInterval(function () { faxRow.style.display = faxMode ? '' : 'none'; if (drawer.classList.contains('hidden')) return; const t = morseQueue.join('').trim(); if (faxMode) qv.textContent = 'FAX[' + faxModeName() + ']: 打った文字が紙に出ます。「FAX 送信」で送信 / 「送り方」で切替 / ESC で終了'; else { qv.textContent = ''; if (t) { qv.appendChild(document.createTextNode('送信待ち ')); qv.appendChild(monoSpan(t)); } } }, 250);
     })();
 
 
@@ -2310,6 +2327,15 @@ const HTML = `<!DOCTYPE html>
     const FAX_TEXT_ROWS = 14;
     const FAX_FREQ = { pre: 1500, sync: 900, white: 1300, black: 2100 };
     let faxMode = false, faxText = '', faxProbe = '';
+    // 送り方（送る側が選ぶ）: アナログライクデジタル＝中身はデータ便でも届けて、紙は音の速さで出る（きれいに読める）／ 完全アナログ＝音だけ（ゆがみも、そのまま紙に出る）
+    let faxAnalog = false; try { faxAnalog = localStorage.getItem('pochitalk_fax_analog') === '1'; } catch (_) {}
+    function faxModeName() { return faxAnalog ? '完全アナログ' : 'アナログライクデジタル'; }
+    function toggleFaxAnalog() {
+      faxAnalog = !faxAnalog;
+      try { localStorage.setItem('pochitalk_fax_analog', faxAnalog ? '1' : '0'); } catch (_) {}
+      flashSub('FAX: ' + faxModeName() + (faxAnalog ? '（音だけで送る。ゆがみもそのまま出ます）' : '（中身はデータでも届ける。きれいに読めます）'));
+      renderFaxCompose();
+    }
     let faxTxActive = false, faxPlaying = false, faxSession = 0;
     const faxCanvas = document.getElementById('faxCanvas');
     const faxCtx2d = faxCanvas.getContext('2d');
@@ -2329,7 +2355,7 @@ const HTML = `<!DOCTYPE html>
       faxImg.data[i + 3] = 255;
     }
     function renderFaxCompose() {
-      if (faxText) setHash(lcdSub, faxText + '▌'); else lcdSub.textContent = 'FAXモード: 文字を打って Enter で送信（ESCで終了）';
+      if (faxText) setHash(lcdSub, faxText + '▌'); else lcdSub.textContent = 'FAX[' + faxModeName() + ']: 打って Enter で送信（Tab で切替・ESCで終了）';
     }
     function enterFaxMode() {
       abortMorse();
@@ -2447,7 +2473,7 @@ const HTML = `<!DOCTYPE html>
       faxCanvas.classList.remove('hidden');
       faxFillPaper();
       beginFaxTx();
-      if (sendFaxPage) { try { sendFaxPage(faxGridToPayload(grid)); } catch (_) {} } // 中身はデータ便でも先に送る（表示は音に合わせて後から）
+      if (sendFaxPage && !faxAnalog) { try { sendFaxPage(faxGridToPayload(grid)); } catch (_) {} } // 中身はデータ便でも先に送る（表示は音に合わせて後から）
       await morseSleep(500);
       if (session !== faxSession) { faxPlaying = false; return; }
       await faxTone(FAX_FREQ.pre, 700); // ピー（受信開始の合図）: 受信側が確実に拾えるよう長めに
@@ -2966,7 +2992,7 @@ const HTML = `<!DOCTYPE html>
         return;
       }
       pres.announced = true; pres.lastSent = Date.now();
-      presenceSend({ ch: currentKey, cn: goodLinkCount(), ag: Math.floor((Date.now() - roomEnterTime) / 1000), talking: isTransmitting, name: shownName(), tag: roomMeta.tag, by: roomMeta.by, at: roomMeta.at });
+      presenceSend({ ch: currentKey, cn: goodLinkCount(), ag: Math.floor((Date.now() - roomEnterTime) / 1000), talking: isTransmitting, name: shownName(), tag: roomMeta.tag, by: roomMeta.by, at: roomMeta.at, op: roomOpenAt });
     }
     function announceSoon() { setTimeout(announce, 300 + Math.random() * 1200); }
 
@@ -2984,7 +3010,7 @@ const HTML = `<!DOCTYPE html>
       if (!isKey(d.ch)) return;
       const isNew = !lobbyEntries.has(ev.pubkey);
       let roomWasKnown = true; try { roomWasKnown = Array.from(lobbyEntries.values()).some(function (v) { return v.ch === d.ch; }); } catch (_) {}
-      lobbyEntries.set(ev.pubkey, { ch: d.ch, ag: (typeof d.ag === 'number' && d.ag >= 0) ? d.ag : 9999, cn: (typeof d.cn === 'number' && d.cn >= 0 && d.cn < 32) ? d.cn : -1, talking: !!d.talking, name: String(d.name || '?').slice(0, 12), tag: capTag(d.tag), by: String(d.by || '').slice(0, 12), at: typeof d.at === 'number' ? d.at : 0, ts: Date.now() });
+      lobbyEntries.set(ev.pubkey, { ch: d.ch, ag: (typeof d.ag === 'number' && d.ag >= 0) ? d.ag : 9999, cn: (typeof d.cn === 'number' && d.cn >= 0 && d.cn < 32) ? d.cn : -1, talking: !!d.talking, name: String(d.name || '?').slice(0, 12), tag: capTag(d.tag), by: String(d.by || '').slice(0, 12), at: typeof d.at === 'number' ? d.at : 0, op: (typeof d.op === 'number' && d.op > 1.6e12 && d.op <= Date.now() + 600000) ? d.op : 0, ts: Date.now() });
       if (!roomWasKnown && d.ch !== currentKey) { try { notifyNewRoom(d); } catch (_) {} }
       if (isNew && d.ch === currentKey) { try { window.pcLogAdd('一覧に現れた: ' + String(d.name || '?').slice(0, 12)); } catch (_) {} }
       if (isNew) announceSoon(); // 新しく来た人に、こちらの在室を、すぐ知らせる
@@ -3052,13 +3078,15 @@ const HTML = `<!DOCTYPE html>
     function roomStats() {
       const stats = new Map();
       lobbyEntries.forEach(function (v) {
-        const e = stats.get(v.ch) || { count: 0, air: false, names: [], tag: '', tagBy: '', tagAt: 0 };
+        const e = stats.get(v.ch) || { count: 0, air: false, names: [], tag: '', tagBy: '', tagAt: 0, op: 0 };
+        if (v.op > 0 && (!e.op || v.op < e.op)) e.op = v.op;
         e.count++; e.names.push(v.name); if (v.talking) e.air = true;
         if (v.at > e.tagAt) { e.tagAt = v.at; e.tag = v.tag; e.tagBy = v.by; }
         stats.set(v.ch, e);
       });
       if (currentKey) {
-        const me = stats.get(currentKey) || { count: 0, air: false, names: [], tag: '', tagBy: '', tagAt: 0 };
+        const me = stats.get(currentKey) || { count: 0, air: false, names: [], tag: '', tagBy: '', tagAt: 0, op: 0 };
+        if (roomOpenAt > 0 && (!me.op || roomOpenAt < me.op)) me.op = roomOpenAt; else if (me.op > 0 && me.op < roomOpenAt) roomOpenAt = me.op; // いちばん早い時刻を採用
         if (roomMeta.at > me.tagAt) { me.tagAt = roomMeta.at; me.tag = roomMeta.tag; me.tagBy = roomMeta.by; }
         me.count++; me.names.unshift(shownName() + '(自分)'); if (isTransmitting) me.air = true;
         stats.set(currentKey, me);
@@ -3086,7 +3114,21 @@ const HTML = `<!DOCTYPE html>
       tagEditBtn.textContent = open ? 'やめる' : (roomMeta.tag ? '変える' : 'つける');
     }
     function closeTagForm() { tagForm.classList.add('hidden'); syncTagBtn(); }
+    function fmtElapsed(ms) {
+      const m = Math.floor(Math.max(0, ms) / 60000);
+      if (m < 1) return 'いま開いたばかり';
+      if (m < 60) return m + '分';
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + '時間' + (m % 60) + '分';
+      return Math.floor(h / 24) + '日' + (h % 24) + '時間';
+    }
+    function renderOpenLine() {
+      const el = document.getElementById('lcdOpen');
+      el.textContent = openLineOp < 0 ? '♾ 常設' : (openLineOp > 0 ? '⏱ 開いてから ' + fmtElapsed(Date.now() - openLineOp) : '');
+    }
+    setInterval(function () { if (currentKey && !isBotRoom(currentKey)) { try { roomStats(); } catch (_) {} openLineOp = roomOpenAt; } renderOpenLine(); }, 15000);
     function renderTagRow() {
+      openLineOp = currentKey ? (isBotRoom(currentKey) ? -1 : roomOpenAt) : 0; renderOpenLine();
       tagTextEl.replaceChildren();
       if (isBotRoom(currentKey)) {
         tagTextEl.textContent = BOT_ROOM_TAG;
@@ -3152,6 +3194,7 @@ const HTML = `<!DOCTYPE html>
     function idlePlaceholders() { // どこにも入っていないときの、本体の表示
       chDisplay.textContent = 'ROOM HASH';
       freqDisplay.textContent = '----·----';
+      openLineOp = 0; renderOpenLine();
       document.getElementById('tagText').textContent = '';
       statusLabel.textContent = 'STANDBY'; statusLabel.style.color = '#38bdf8';
       peersList.textContent = '';
@@ -3178,6 +3221,7 @@ const HTML = `<!DOCTYPE html>
       previewShown = true;
       chDisplay.textContent = 'ダイヤルの部屋';
       setHash(freqDisplay, fmt(key));
+      openLineOp = isBotRoom(key) ? -1 : (st.op || 0); renderOpenLine();
       document.getElementById('tagText').textContent = st.tag ? '🏷 ' + st.tag : '';
       statusLabel.textContent = '入室していません'; statusLabel.style.color = '#94a3b8';
       peersList.textContent = '';
@@ -3219,6 +3263,7 @@ const HTML = `<!DOCTYPE html>
         inviteShown = true;
         chDisplay.textContent = 'INVITED';
         setHash(freqDisplay, fmt(pendingKey));
+        openLineOp = isBotRoom(pendingKey) ? -1 : ((st && st.op) || 0); renderOpenLine();
         document.getElementById('tagText').textContent = (st && st.tag) ? '🏷 ' + st.tag : '';
         statusLabel.textContent = '招待された部屋'; statusLabel.style.color = '#fbbf24';
         peersList.textContent = '';
@@ -3259,6 +3304,8 @@ const HTML = `<!DOCTYPE html>
     }
 
     // ---------- 部屋を探すダイヤル ----------
+    const FLAT = new URLSearchParams(location.search).get('m') === 'flatten'; // 隠しモード（?m=flatten）: 全室を平らに並べる
+    if (FLAT) document.body.classList.add('flat');
     const DIAL_ROW = 132; // 1行の高さ(px)。CSS の --rdial-row と同じ
     let dialKeys = [];
     let dialBusy = false, dialPending = false, dialTimer = null, dialProgrammatic = false, dialLastIdx = -1, dialLastTick = 0, dialRaf = 0;
@@ -3380,6 +3427,11 @@ const HTML = `<!DOCTYPE html>
     });
 
     let dialShownKey = null;
+    function fitFlat() { // 平らに並べるモード: 5 件ぶんの高さまで見せて、それより多い分は、スクロールで見る
+      const wrap = document.getElementById('dialWrap'), kids = scanList.querySelectorAll('.rdial-item');
+      let h = 10; for (let i = 0; i < Math.min(5, kids.length); i++) h += kids[i].offsetHeight;
+      wrap.style.maxHeight = (kids.length > 5 ? h : 9999) + 'px';
+    }
     function buildDial(keys, stats, f) {
       if (dialBusy) { dialPending = true; return; }
       const prevKey = dialKeys[dialIndex()], prevIdx = dialIndex();
@@ -3401,7 +3453,9 @@ const HTML = `<!DOCTYPE html>
         b.dataset.key = key;
         const head = document.createElement('div');
         head.textContent = ''; head.appendChild(document.createTextNode((isBotRoom(key) ? '🦜 ' : '') + (st.air ? '🔴 ' : '🔵 '))); head.appendChild(monoSpan(fmt(key))); head.appendChild(document.createTextNode(' · 👤' + st.count + (isBotRoom(key) && botAway(key) ? ' · 🌙 休憩中' : '') + (key === currentKey && st.count !== peerMap.size + 1 ? '（つながっているのは ' + (peerMap.size + 1) + ' 人）' : '') + (st.count >= MAX_ROOM ? ' · 満員' : '') + (key === pendingKey ? ' · 招待' : '')));
+        const opn = document.createElement('div'); opn.className = 'chip-open'; opn.textContent = isBotRoom(key) ? '♾ 常設' : ((st.op > 0 && st.count > 0) ? '⏱ 開いてから ' + fmtElapsed(Date.now() - st.op) : ''); // ID の下（赤い線の上）
         b.appendChild(head);
+        b.appendChild(opn);
         if (st.tag) {
           const tg = document.createElement('div');
           tg.className = 'chip-tag';
@@ -3415,7 +3469,7 @@ const HTML = `<!DOCTYPE html>
         else appendNames(who, st.names);
         b.appendChild(who);
         // 赤い線に合わせた部屋をタップすると入る。ほかの部屋をタップすると、そこまで回る
-        b.addEventListener('click', function () { if (i === dialIndex()) tuneKey(key); else dialGo(i); });
+        b.addEventListener('click', function () { if (FLAT || i === dialIndex()) tuneKey(key); else dialGo(i); });
         scanList.appendChild(b);
       });
       // 再描画のあとも、同じ部屋が、赤い線の位置に残るようにする（初回は、いまいる部屋、なければ先頭）
@@ -3427,6 +3481,7 @@ const HTML = `<!DOCTYPE html>
       scanList.scrollTop = at * DIAL_ROW;
       dialLastIdx = at;
       dialUpdate();
+      if (FLAT) fitFlat();
       renderPreview();
       renderDialDetail();
       setTimeout(function () { dialProgrammatic = false; }, 120);
@@ -3487,7 +3542,7 @@ const HTML = `<!DOCTYPE html>
       btn.disabled = true;
       btn.textContent = '再接続中…';
       flashSub(auto ? '接続が切れた可能性があるので、つなぎ直しています…' : '再接続中…');
-      try { sessionStorage.setItem(REJOIN_KEY, JSON.stringify({ key: currentKey, vox: voxCheck.checked, at: Date.now(), meta: { tag: roomMeta.tag, by: roomMeta.by, at: roomMeta.at } })); } catch (_) {}
+      try { sessionStorage.setItem(REJOIN_KEY, JSON.stringify({ key: currentKey, vox: voxCheck.checked, at: Date.now(), op: roomOpenAt, meta: { tag: roomMeta.tag, by: roomMeta.by, at: roomMeta.at } })); } catch (_) {}
       if (isTransmitting) { pressed = false; stopTransmission(); }
       const oldRoom = room;
       room = null;
@@ -3540,6 +3595,7 @@ const HTML = `<!DOCTYPE html>
       try { r = JSON.parse(sessionStorage.getItem(REJOIN_KEY) || 'null'); sessionStorage.removeItem(REJOIN_KEY); } catch (_) {}
       if (!r || !isKey(r.key) || typeof r.at !== 'number' || Date.now() - r.at > 60000) return false;
       if (r.meta && typeof r.meta.at === 'number' && r.meta.at > 0 && r.meta.tag) pendingRoomMeta = { key: r.key, tag: r.meta.tag, by: r.meta.by, at: r.meta.at };
+      if (typeof r.op === 'number' && r.op > 1.6e12) pendingOpenAt = r.op;
       tuneKey(r.key, true);
       flashSub('再接続しました。相手が見つかるまで少し待ってください');
       if (r.vox) initMicrophone(true).then(function (ok) { if (ok && currentKey === r.key) { setVoxUI(true); startVox(); } });
@@ -4249,7 +4305,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-10-z12q41（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
+const APP_VERSION = '2026-11-11-z12q42（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため

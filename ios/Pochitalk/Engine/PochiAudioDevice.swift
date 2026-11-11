@@ -1,7 +1,11 @@
 import AVFAudio
 import AudioToolbox
 import Foundation
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 import WebRTC
 import os
 
@@ -72,10 +76,14 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
         fxBuf.initialize(repeating: 0, count: fxCapacity)
         super.init()
         let nc = NotificationCenter.default
+        #if os(iOS)
         nc.addObserver(self, selector: #selector(onInterruption(_:)), name: AVAudioSession.interruptionNotification, object: nil)
         nc.addObserver(self, selector: #selector(onRouteChange(_:)), name: AVAudioSession.routeChangeNotification, object: nil)
         nc.addObserver(self, selector: #selector(onMediaReset(_:)), name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
         nc.addObserver(self, selector: #selector(onForeground), name: UIApplication.didBecomeActiveNotification, object: nil)
+        #else
+        nc.addObserver(self, selector: #selector(onForeground), name: NSApplication.didBecomeActiveNotification, object: nil)
+        #endif
     }
 
     var currentSampleRate: Double { sampleRate }
@@ -95,11 +103,19 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
     var deviceInputSampleRate: Double { sampleRate }
     var inputIOBufferDuration: TimeInterval { ioDuration }
     var inputNumberOfChannels: Int { 1 }
+    #if os(iOS)
     var inputLatency: TimeInterval { AVAudioSession.sharedInstance().inputLatency }
+    #else
+    var inputLatency: TimeInterval { 0 }
+    #endif
     var deviceOutputSampleRate: Double { sampleRate }
     var outputIOBufferDuration: TimeInterval { ioDuration }
     var outputNumberOfChannels: Int { 1 }
+    #if os(iOS)
     var outputLatency: TimeInterval { AVAudioSession.sharedInstance().outputLatency }
+    #else
+    var outputLatency: TimeInterval { 0 }
+    #endif
 
     private(set) var isInitialized = false
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
@@ -132,6 +148,10 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
     /// カテゴリを通話向けにして、必要なら有効にする。audioQ 上で呼ぶ。
     @discardableResult
     private func configureSession(activate: Bool) -> Bool {
+        #if os(macOS)
+        sampleRate = 48000; ioDuration = 0.02 // Mac には音声セッションがない。標準の入出力を使う
+        return true
+        #else
         let s = AVAudioSession.sharedInstance()
         do {
             try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
@@ -145,10 +165,13 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
             log.error("audio session setup failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
+        #endif
     }
 
     private func deactivateSession() {
+        #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 
     // ================================================================ ユニットの起動/停止
@@ -322,9 +345,27 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
             if !gotData { p.update(repeating: 0, count: n) }
             if b.mNumberChannels == 1 { tones.feed(p, n, rate: sampleRate) }
             if speakerMuted { p.update(repeating: 0, count: n) }
+            if b.mNumberChannels == 1 { mixSidetone(p, n) }
             mixEffects(p, n)
         }
         return noErr
+    }
+
+    /// 送信中のモールス / FAX の音を、自分のスピーカーでも小さく鳴らす (モニター音)。キーの上げ下げは、なめらかに入り切りする。
+    private var sidePhase = 0.0
+    private var sideGain: Float = 0
+    private func mixSidetone(_ out: UnsafeMutablePointer<Int16>, _ n: Int) {
+        let on = morseMode && morseKey && !speakerMuted
+        if !on && sideGain < 0.001 { sideGain = 0; return }
+        let target: Float = on ? 1 : 0
+        let step = 2 * Double.pi * toneHz / max(8000, sampleRate)
+        let amp: Float = 0.12 * 32767
+        for i in 0..<n {
+            sideGain += (target - sideGain) * 0.02
+            let s = Float(sin(sidePhase)) * sideGain * amp
+            sidePhase += step; if sidePhase > 2 * Double.pi { sidePhase -= 2 * Double.pi }
+            out[i] = Int16(max(-32768, min(32767, Int32(out[i]) + Int32(s))))
+        }
     }
 
     private func mixEffects(_ out: UnsafeMutablePointer<Int16>, _ n: Int) {
@@ -341,6 +382,9 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
         os_unfair_lock_unlock(&fxLock)
     }
 
+    /// 音声ユニットが動いているか (部屋にいる間は true)
+    var isUnitRunning: Bool { unitRunning }
+
     /// 効果音を鳴らす (再生側のバッファに足す)。ユニットが動いていないときは鳴らない。
     func playEffect(_ samples: [Int16]) {
         guard unitRunning, !speakerMuted else { return }
@@ -355,6 +399,7 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
 
     // ================================================================ 割り込み・経路変更・復帰
 
+    #if os(iOS)
     @objc private func onInterruption(_ n: Notification) {
         guard let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
@@ -397,6 +442,8 @@ final class PochiAudioDevice: NSObject, RTCAudioDevice {
             resume()
         }
     }
+
+    #endif
 
     @objc private func onForeground() {
         audioQ.async { [self] in

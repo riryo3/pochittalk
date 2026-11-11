@@ -58,7 +58,7 @@ object PochiEngine {
     const val APP_ID = "pochitalk-v2"
     const val BOT_ROOM_KEY = "22360679" // おうむ返しボットの部屋 (表示 2236·0679。タグは固定)。入口は、この番号
     const val BOT_ROOM_OLD = "7a0b07c1" // 旧い番号。古い版の人が来るので、しばらく残す
-    const val MAX_ROOM = 8 // 1つの部屋は8人まで (Web版と同じ)
+    const val MAX_ROOM = 99 // 1部屋の人数の上限 (Web版と同じ値。実質、制限なし)
     private const val ACTION_PTT_STATE = "pttState"
     private const val ACTION_PTT_NAME = "pttName"
     private const val ACTION_ROOM_TAG = "roomTag" // Web版と共通: {tag, by, at}。話題タグ。新しい(at が大きい)ほうが勝つ
@@ -79,6 +79,7 @@ object PochiEngine {
     private const val PREF_LEFTY = "pochitalk_lefty"           // Web版と同じ: オンにしたときだけ "1" を保存
     private const val PREF_AUTO_RECONNECT = "pochitalk_auto_reconnect" // 自動で再接続する: オンにしたときだけ "1" を保存 (標準はオフ)
     private const val PREF_NOTIFY_ROOM = "pochitalk_notify_room"
+    private const val PREF_FAX_ANALOG = "pochitalk_fax_analog"
     private const val PREF_LOG_MODE = "pochitalk_log_mode"
     private const val PREF_CONSENT = "pochitalk_consent"
     /** 利用上の注意の版。内容を変えたら日付を変えると、もう一度同意を求める。 */
@@ -144,6 +145,8 @@ object PochiEngine {
         /** 相手の「音声が通っている相手の数」と「入室してからの秒数」。無ければ -1 / 9999 (Web版と同じ)。 */
         val cn: Int = -1,
         val ag: Int = 9999,
+        /** 相手が見ている「部屋を開いた時刻」(エポックms)。無い/不正は0。 */
+        val op: Long = 0L,
     )
     private val lobbyEntries = HashMap<String, LobbyEntry>()
 
@@ -171,6 +174,12 @@ object PochiEngine {
     @Volatile private var hiddenAt = 0L
     private var micTest = false
     private var roomEnterTime = 0L
+    /** 部屋を開いた時刻 (一覧で見えた値と自分の値の最小)。直前の部屋の値は、60秒以内に戻れば引き継ぐ。 */
+    private var roomOpenAt = 0L
+    private var savedOpenKey: String? = null
+    private var savedOpenAt = 0L
+    private var savedOpenTime = 0L
+    private var savedMeta: Meta? = null
     private var currentTalkerId: String? = null
     private var isTransmitting = false
     private var pressed = false
@@ -223,7 +232,7 @@ object PochiEngine {
         val savedGain = prefs.getInt(PREF_MIC_GAIN, 0).coerceIn(0, 30)
         micGain.gain = Math.pow(10.0, savedGain / 20.0).toFloat()
         _state.update { it.copy(micGainDb = savedGain, welcomeOn = prefs.getString(PREF_WELCOME, null) != "off", autoReconnect = prefs.getString(PREF_AUTO_RECONNECT, null) == "1") }
-        _state.update { it.copy(notifyRoom = prefs.getString(PREF_NOTIFY_ROOM, null) == "1", consentOk = prefs.getString(PREF_CONSENT, null) == CONSENT_VERSION) }
+        _state.update { it.copy(notifyRoom = prefs.getString(PREF_NOTIFY_ROOM, null) == "1", faxAnalog = prefs.getString(PREF_FAX_ANALOG, null) == "1", consentOk = prefs.getString(PREF_CONSENT, null) == CONSENT_VERSION) }
         if (prefs.getString(PREF_LOG_MODE, null) == "1") { _state.update { it.copy(logMode = true) }; startLogFile() }
         val savedSfx = prefs.getInt(PREF_SFX_VOL, 100).coerceIn(0, 150)
         sounds.volume = savedSfx / 100f
@@ -354,6 +363,7 @@ object PochiEngine {
             tagAt = d.optLong("at", 0L),
             cn = d.optInt("cn", -1).let { if (it in 0..31) it else -1 },
             ag = d.optInt("ag", 9999).let { if (it >= 0) it else 9999 },
+            op = d.optLong("op", 0L).let { if (it > 1_600_000_000_000L && it <= System.currentTimeMillis() + 600_000L) it else 0L },
         )
         if (firstOfRoom) maybeNotifyNewRoom(ch)
         if (isNew) {
@@ -428,7 +438,8 @@ object PochiEngine {
             JSONObject().put("ch", key).put("talking", isTransmitting).put("name", shownName())
                 .put("tag", roomMeta.tag).put("by", roomMeta.by).put("at", roomMeta.at)
                 .put("cn", room?.goodLinkCount() ?: 0)
-                .put("ag", ((System.currentTimeMillis() - roomEnterTime) / 1000).toInt().coerceAtLeast(0)),
+                .put("ag", ((System.currentTimeMillis() - roomEnterTime) / 1000).toInt().coerceAtLeast(0))
+                .put("op", roomOpenAt),
         )
     }
 
@@ -439,6 +450,7 @@ object PochiEngine {
         var tag: String = "",
         var tagBy: String = "",
         var tagAt: Long = 0L,
+        var openAt: Long = 0L,
     )
 
     private fun renderScan() {
@@ -449,6 +461,7 @@ object PochiEngine {
             s.count++
             s.names.add(e.name)
             if (e.talking) s.air = true
+            if (e.op > 0 && (s.openAt == 0L || e.op < s.openAt)) s.openAt = e.op
             if (e.tagAt > s.tagAt) { // 部屋のタグは、いちばん新しいものを採用する
                 s.tagAt = e.tagAt
                 s.tag = e.tag
@@ -458,6 +471,8 @@ object PochiEngine {
         val cur = currentKey
         if (cur != null) {
             val s = stats.getOrPut(cur) { Stat() }
+            if (s.openAt in 1 until roomOpenAt) roomOpenAt = s.openAt // 入室後も、一覧の最小値に合わせ直す
+            if (roomOpenAt > 0 && (s.openAt == 0L || roomOpenAt < s.openAt)) s.openAt = roomOpenAt
             s.count++
             s.names.add(0, shownName() + "(自分)")
             if (isTransmitting) s.air = true
@@ -482,6 +497,7 @@ object PochiEngine {
                 isCurrent = k == cur,
                 tag = s.tag,
                 tagBy = s.tagBy,
+                openAt = if (s.count > 0) s.openAt else 0L,
             )
         }
         _state.update { it.copy(rooms = rooms, totalPeople = total, pendingKey = pend) }
@@ -531,8 +547,13 @@ object PochiEngine {
         _state.update { it.copy(micTest = false) }
         stopVoxInternal() // Web版と同じく、入室するとVOXはオフに戻る
         roomEnterTime = System.currentTimeMillis()
-        roomMeta = Meta("", "", 0L)
-        _state.update { it.copy(roomTag = "", roomTagBy = "") }
+        run {
+            val lobbyMin = lobbyEntries.values.filter { it.key == key && it.op > 0 }.minOfOrNull { it.op } ?: 0L
+            val resume = if (savedOpenKey == key && roomEnterTime - savedOpenTime <= 60_000L) savedOpenAt else 0L
+            roomOpenAt = listOf(lobbyMin, resume).filter { it > 0 }.minOrNull() ?: roomEnterTime
+        }
+        roomMeta = if (savedOpenKey == key && roomEnterTime - savedOpenTime <= 60_000L) (savedMeta ?: Meta("", "", 0L)) else Meta("", "", 0L) // 60秒以内に戻れば、話題タグを引き継ぐ
+        _state.update { it.copy(roomTag = roomMeta.tag, roomTagBy = roomMeta.by) }
 
         connectRoom(n, key)
 
@@ -661,6 +682,9 @@ object PochiEngine {
         if (isTransmitting) {
             pressed = false
             stopTransmission()
+        }
+        if (currentKey != null && roomOpenAt > 0) {
+            savedOpenKey = currentKey; savedOpenAt = roomOpenAt; savedOpenTime = System.currentTimeMillis(); savedMeta = roomMeta
         }
         room?.leave()
         room = null
@@ -925,6 +949,16 @@ object PochiEngine {
     // ================================================================ マイクと音声セッション
 
     private fun ensureMic() {
+        // 長く放置したあとにマイクが死んでいたら (トラックが終了状態)、捨てて取り直す
+        audioTrack?.let { t ->
+            val dead = try { t.state() == org.webrtc.MediaStreamTrack.State.ENDED } catch (_: Throwable) { true }
+            if (dead) {
+                try { t.dispose() } catch (_: Throwable) {}
+                try { audioSource?.dispose() } catch (_: Throwable) {}
+                audioTrack = null
+                audioSource = null
+            }
+        }
         if (audioTrack != null) {
             room?.let { r -> audioTrack?.let { r.addLocalTrack(it, STREAM_ID) } }
             return
@@ -1047,6 +1081,30 @@ object PochiEngine {
 
     // ================================================================ 話す (PTT)
 
+    // ---------------------------------------------------------------- 外付けキーボード
+
+    private var spaceHeld = false
+
+    /** スペースキーを押した: 話す。モールス送信中は、何もしない (Web版と同じく、押している間だけ話す)。 */
+    fun hardSpaceDown() {
+        Runtime.scope.launch {
+            if (spaceHeld || room == null || morseJob != null || _state.value.faxMode) return@launch
+            spaceHeld = true
+            pressed = true
+            startTransmission(quiet = false)
+        }
+    }
+
+    /** スペースキーを離した: 必ず送信を止める。 */
+    fun hardSpaceUp() {
+        Runtime.scope.launch {
+            if (!spaceHeld) return@launch
+            spaceHeld = false
+            pressed = false
+            stopTransmission()
+        }
+    }
+
     fun pttPress() {
         Runtime.scope.launch {
             pressed = true
@@ -1141,6 +1199,7 @@ object PochiEngine {
             if (st.faxMode) {
                 if (morseJob != null) return@launch // 送信中は受け付けない
                 when {
+                    k == "MODE" -> toggleFaxAnalog()
                     k == "BS" -> _state.update { it.copy(faxText = it.faxText.dropLast(1)) }
                     k == "ENTER" -> if (st.faxText.isNotEmpty()) startFax(st.faxText)
                     k.length == 1 && st.faxText.length < 24 -> _state.update { it.copy(faxText = it.faxText + k) }
@@ -1167,6 +1226,14 @@ object PochiEngine {
         abortMorseInternal()
         faxProbe = ""
         _state.update { it.copy(faxMode = true, faxText = "", fax = FaxPaper(Fax.MAX_COLS, BooleanArray(Fax.ROWS * Fax.MAX_COLS), Fax.ROWS, "")) }
+    }
+
+    /** FAX の送り方を切り替える (Web版の Tab): 完全アナログ=音だけ / アナログライクデジタル=音+データ便。端末に保存する。 */
+    private fun toggleFaxAnalog() {
+        val on = !_state.value.faxAnalog
+        _state.update { it.copy(faxAnalog = on) }
+        if (on) prefs.edit().putString(PREF_FAX_ANALOG, "1").apply() else prefs.edit().remove(PREF_FAX_ANALOG).apply()
+        flash(if (on) "FAX: 完全アナログ（音だけで送る。ゆがみもそのまま出ます）" else "FAX: アナログライクデジタル（中身はデータでも届ける。きれいに読めます）")
     }
 
     private fun exitFaxMode() {
@@ -1200,7 +1267,7 @@ object PochiEngine {
         val mine = myNickname
         _state.update { it.copy(fax = FaxPaper(cols, black.copyOf(), Fax.ROWS, mine)) }
         val (c, d) = Fax.gridToPayload(grid)
-        faxPageAction?.sendJson(JSONObject().put("c", c).put("d", d)) // 中身はデータ便でも先に送る (表示は音に合わせて後から)
+        if (!_state.value.faxAnalog) faxPageAction?.sendJson(JSONObject().put("c", c).put("d", d)) // 中身はデータ便でも先に送る (表示は音に合わせて後から)
         val job = Runtime.scope.launch {
             delay(500)
             micGain.keyDown = true
