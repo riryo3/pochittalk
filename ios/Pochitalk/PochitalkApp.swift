@@ -111,6 +111,10 @@ struct PochitalkApp: App {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 12 + Double(n) * 8) { PochiEngine.shared.debugFakePresence(args[i + 1], args[j + 1]) }
                 }
             }
+            if args.contains("-automedia") { // 開発用: メディアボタンの切り替えを、機械的に 2 回 (話し始め → 止め)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 14) { PochiEngine.shared.mediaToggle() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 20) { PochiEngine.shared.mediaToggle() }
+            }
             if args.contains("-autovox") { DispatchQueue.main.asyncAfter(deadline: .now() + 9) { PochiEngine.shared.setVox(true) } }
         }
         #endif
