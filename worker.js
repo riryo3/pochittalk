@@ -308,6 +308,27 @@ const HTML = `<!DOCTYPE html>
     body.flat .rdial-item > div:nth-child(3) { margin-top: 2px; }
     body.flat .rdial-item > div.chip-open { height: auto; line-height: 1.4; }
     body.flat .rdial-line, body.flat .rdial-rail, body.flat .rdial-ridges, body.flat .rdial-fade, body.flat .rdial-wrap::before { display: none; }
+    /* ぽっと通話（potalk.app）の部屋の一覧と、参加中のパネル */
+    .pt-lobby { margin-top: 14px; padding-top: 12px; border-top: 1px solid #374151; display: flex; flex-direction: column; gap: 8px; }
+    .pt-note { font-size: 0.74rem; color: var(--muted-color); line-height: 1.4; }
+    .pt-empty { font-size: 0.8rem; color: var(--muted-color); text-align: center; padding: 14px 8px; }
+    .pt-item { border: 1px solid #2d3748; border-left: 3px solid #a78bfa; border-radius: 10px; padding: 10px 12px; background: #0f1419; display: flex; flex-direction: column; gap: 6px; }
+    .pt-item.me { border-left-color: #34d399; }
+    .pt-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    .pt-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .pt-meta { font-size: 0.74rem; color: var(--muted-color); white-space: nowrap; }
+    .pt-tag { font-size: 0.8rem; color: #93c5fd; }
+    .pt-who { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pt-who span { background: #1f2937; border: 1px solid #374151; border-radius: 999px; padding: 2px 10px; font-size: 0.78rem; }
+    .pt-toggle { font-size: 0.76rem; color: var(--muted-color); display: flex; gap: 6px; align-items: center; }
+    .pt-room-name { font-weight: 800; font-size: 1.05rem; margin: 6px 0; }
+    /* バンド切り替え（AM / FM のように）: ダイヤルの下で、ぽちっと通話とぽっと通話の部屋を切り替える */
+    .band-switch { display: flex; gap: 0; margin-top: 12px; border: 1px solid #374151; border-radius: 999px; overflow: hidden; background: #0f1419; }
+    .band-switch button { flex: 1 1 0; padding: 9px 6px; font-size: 0.84rem; font-weight: 700; color: var(--muted-color); background: none; border: none; cursor: pointer; font-family: inherit; }
+    .band-switch button.on { background: #1d4ed8; color: #fff; }
+    .band-switch button#bandPotalk.on { background: #6d28d9; }
+    button#ptTalkBtn { padding: 22px 0; font-size: 1.05rem; touch-action: none; user-select: none; -webkit-user-select: none; }
+    button#ptTalkBtn.on { background: #dc2626; }
     .rdial-fade.bottom { bottom: 0; background: linear-gradient(0deg, rgba(15,20,25,.8) 0%, rgba(15,20,25,0) 100%); }
     .chan-chip.bot { border-color: #34d399; box-shadow: 0 0 8px rgba(52,211,153,0.35); }
     .chan-chip.full { opacity: .55; }
@@ -454,6 +475,16 @@ const HTML = `<!DOCTYPE html>
       .dial-scrim { position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.5); }
       body.dial-open .dial-scrim { display: block; }
       .morse-drawer { left: 0; }
+      /* 縦に長い端末（Xperia など、縦横比が 2.2 以上）は、ダイヤルを、ドロワーにせず、画面の下に置く */
+      body.dial-bottom { padding-left: 10px; }
+      body.dial-bottom .dial-tab, body.dial-bottom .dial-scrim { display: none !important; }
+      body.dial-bottom #dialCard { position: static; width: 100%; max-width: 400px; margin: 12px auto 0 !important; padding-top: 14px; z-index: auto; overflow: visible; border-radius: 20px; transform: none; transition: none; }
+      body.dial-bottom #dialCard .scan-title { margin-bottom: 4px; }
+      /* 画面の下に収まるよう、ダイヤルは 1.6 行ぶんの高さ（真ん中の 1 行と、上下に少し）。検索欄と詳しい情報は出さない */
+      body.dial-bottom #dialCard .rdial-wrap { height: calc(var(--rdial-row) * 1.6); }
+      body.dial-bottom #dialCard .rdial { padding: calc(var(--rdial-row) * 0.3) 0; }
+      body.dial-bottom #searchInput, body.dial-bottom #dialDetail { display: none !important; }
+      body.dial-bottom #dialCard { gap: 8px; padding-bottom: 10px; }
     }
 
     /* 広い画面: 左に本体、右にダイヤル。ダイヤルの下に、操作ボタンの別カード */
@@ -613,7 +644,7 @@ const HTML = `<!DOCTYPE html>
   </main>
 
   <section class="room-panel" id="dialCard" style="margin-top:16px">
-      <div class="scan-title"><span>いまある部屋（赤い線でタップ）</span><span id="onlineCount" style="white-space:nowrap"></span></div>
+      <div class="scan-title" id="dialTitle"><span>いまある部屋（赤い線でタップ）</span><span id="onlineCount" style="white-space:nowrap"></span></div>
       <input type="text" id="searchInput" placeholder="🔍 URL・ハッシュ・名前・話題で絞り込み" autocomplete="off" style="width:100%;flex:none">
       <div class="rdial-wrap" id="dialWrap">
         <div class="rdial-ridges" id="ridges" aria-hidden="true"></div>
@@ -623,6 +654,25 @@ const HTML = `<!DOCTYPE html>
         <div class="rdial-fade top"></div><div class="rdial-fade bottom"></div>
       </div>
       <div class="dial-detail" id="dialDetail"></div>
+      <div class="pt-lobby" id="ptLobbyBox">
+        <div class="scan-title"><span>ぽっと通話の部屋（potalk.app）</span><span id="ptCount" style="white-space:nowrap"></span></div>
+        <div class="pt-note">qramo さんの「ぽっと通話」の部屋です。いつも声が届く別のアプリで、ここから、いまのハンドルネームのまま入れます（入ったときはマイクオフ）</div>
+        <div id="ptList"><div class="pt-empty">ぽっと通話の部屋を探しています…</div></div>
+        <input type="checkbox" id="ptToggle" hidden>
+      </div>
+      <div class="band-switch" id="bandSwitch" role="group" aria-label="部屋の種類を切り替える">
+        <button type="button" id="bandPochi" class="on" aria-pressed="true">🔘 ぽちっと通話</button>
+        <button type="button" id="bandPotalk" aria-pressed="false">📻 ぽっと通話</button>
+      </div>
+  </section>
+
+  <section class="room-panel hidden" id="ptPanel" style="margin-top:16px" aria-label="ぽっと通話の部屋">
+    <div class="scan-title"><span>ぽっと通話の部屋に参加中</span><span id="ptPanelTime"></span></div>
+    <div class="pt-room-name" id="ptPanelName"></div>
+    <div class="pt-who" id="ptMembers"></div>
+    <button class="btn-sub" id="ptTalkBtn" type="button">🎙 押している間だけ話す（スペースキーでも）</button>
+    <button class="btn-sub" id="ptLatchBtn" type="button">🎙 マイクを開けっぱなしにする</button>
+    <button class="btn-sub" id="ptLeaveBtn" type="button">退出する</button>
   </section>
 
     <section class="room-panel" id="homeCard" style="margin-top:16px">
@@ -675,6 +725,15 @@ const HTML = `<!DOCTYPE html>
         </div>
         <p style="opacity:.8;font-size:0.75rem;margin:6px 0 10px">片手で持つときに、親指が届く側に寄せられます。VOX の丸ボタンは、空いている側に付きます。</p>
         <label class="sound-toggle"><input type="checkbox" id="leftyCheck"> 左手用（話すボタンが中央のとき、VOX ボタンを右側に置く）</label>
+        <p style="margin:12px 0 6px">ダイヤルの位置（スマホ）</p>
+        <div class="seg" id="dialPosSeg">
+          <button type="button" class="seg-btn on" data-pos="auto">自動</button>
+          <button type="button" class="seg-btn" data-pos="bottom">画面の下</button>
+          <button type="button" class="seg-btn" data-pos="drawer">横から出す</button>
+        </div>
+        <p style="opacity:.8;font-size:0.75rem;margin:6px 0 10px">「自動」は、縦に長い端末（Xperia など）のときだけ、ダイヤルを画面の下に置きます。それ以外は、左の端から出します。</p>
+        <label class="sound-toggle"><input type="checkbox" id="mediaBtnCheck" checked> メディアボタン（イヤホンのボタンなど）で、話す・止めるを切り替える</label>
+        <p style="opacity:.8;font-size:0.75rem;margin:4px 0 10px">メディアボタンは、押した・離したが分からないので、押すたびに「話す」「止める」を切り替えます。スペースキーは、押している間だけ話します。部屋にいる間は、無音を鳴らし続けます。</p>
         <h3>通話テスト</h3>
         <p style="font-size:0.8rem;opacity:.85;margin-bottom:6px">おうむ返しボットが動いているときだけ使えます。話すと、あなたの声が返ってきます。</p>
         <button class="btn-sub" id="testRoomBtn" type="button" style="width:100%">おうむ返しの部屋に入る</button>
@@ -1476,7 +1535,7 @@ const HTML = `<!DOCTYPE html>
     window.addEventListener('pagehide', closeAllConnections);
     function closeOldConnections(oldRoom) {
       const stale = window.pcLive ? Array.from(window.pcLive).filter(function (pc) { try { return !!pc.remoteDescription; } catch (_) { return false; } }) : [];
-      const done = function () { stale.forEach(function (pc) { try { pc.close(); } catch (_) {} }); };
+      const done = function () { stale.forEach(function (pc) { try { pc.close(); } catch (_) {} }); try { ptAfterClose(); } catch (_) {} }; // ぽっと通話の一覧の接続も巻き込むことがあるので、作り直す
       return Promise.resolve(oldRoom ? oldRoom.leave() : null).catch(function () {}).then(done);
     }
 
@@ -1567,14 +1626,9 @@ const HTML = `<!DOCTYPE html>
         if (peer) peer.isTalking = state.isTalking;
         if (peer) {
           clearTimeout(peer.talkTimer);
-          // 終わりの知らせが届かないまま、90秒続いたら、終わったことにする（話中ロックが、解除されなくなるのを防ぐ）
-          if (state.isTalking) peer.talkTimer = setTimeout(function () {
-            const p2 = peerMap.get(peerId);
-            if (!p2 || !p2.isTalking) return;
-            p2.isTalking = false;
-            if (currentTalkerId === peerId) onStopReceiving();
-            renderPeers();
-          }, 90000);
+          if (peer.stopWait) { clearTimeout(peer.stopWait); peer.stopWait = 0; rxStopPending = Math.max(0, rxStopPending - 1); }
+          // 終わりの知らせが届かないまま、30秒たち、しかも、その人の音も来ていなければ、終わったことにする（話中ロックが、解除されなくなるのを防ぐ）
+          if (state.isTalking) armTalkTimer(peerId);
         }
         if (state.isTalking) {
           resetRxDecode(peerId);
@@ -1592,8 +1646,10 @@ const HTML = `<!DOCTYPE html>
           }
         } else if (currentTalkerId === peerId) {
           setTimeout(function () { flushRxDecode(peerId); }, 600); // 音声の末尾が届き切ってから確定する
-          onStopReceiving();
+          // 終わりの合図は、音声より先に届く。相手の音が静かになるまで待ってから、受信の表示と、終わりの音を出す
+          rxStopWait(peerId);
         }
+        if (!rxStopPending) rxReconcile(); // 合図の届く順番が前後しても、いま話している人の数に、表示を合わせる
         renderPeers();
       });
 
@@ -1628,7 +1684,7 @@ const HTML = `<!DOCTYPE html>
         rxDecoders.delete(peerId);
         faxDecoders.delete(peerId);
         cancelFaxReveal(peerId);
-        if (currentTalkerId === peerId) onStopReceiving();
+        if (currentTalkerId === peerId) rxAfterStop();
         const el = document.getElementById('audio-' + peerId);
         if (el) el.remove();
         renderPeers();
@@ -1761,6 +1817,65 @@ const HTML = `<!DOCTYPE html>
       renderMissing();
     }
 
+    // いま話している人（合図が「話し中」のままの人）の一覧
+    function talkingIds() { const a = []; peerMap.forEach(function (p, id) { if (p.isTalking) a.push(id); }); return a; }
+    // 話していた人が、話し終えた（去った）とき: ほかに、まだ話している人がいれば、受信の表示を残して、終わりの音も鳴らさない
+    function rxAfterStop() {
+      const left = talkingIds();
+      if (left.length === 0) { onStopReceiving(); return; }
+      const p = peerMap.get(left[0]);
+      currentTalkerId = left[0];
+      if (left.length === 1) onStartReceiving((p && p.name) || '相手');
+    }
+    // いま話している人の数に、受信の表示を合わせる（混線のあと、1 人だけが話し続けているときに、表示が消えたままにならないように）
+    function rxReconcile() {
+      if (isTransmitting) return;
+      const t = talkingIds();
+      if (t.length === 1) {
+        const p = peerMap.get(t[0]);
+        if (!ledRx.classList.contains('active') || currentTalkerId !== t[0]) { currentTalkerId = t[0]; onStartReceiving((p && p.name) || '相手'); }
+      } else if (t.length === 0 && (currentTalkerId || ledRx.classList.contains('active'))) onStopReceiving();
+    }
+    // 「話し中」の合図が止まらない人の見張り。30秒たっても、その人の音が来ていなければ、終わったことにする（音が来ている間は、続ける）
+    let rxStopPending = 0;
+    function rxStopWait(peerId) {
+      const peer = peerMap.get(peerId);
+      if (!peer) { rxAfterStop(); return; }
+      clearTimeout(peer.stopWait);
+      rxStopPending++;
+      const t0 = performance.now();
+      let quietSince = 0;
+      const fin = function () {
+        peer.stopWait = 0; rxStopPending = Math.max(0, rxStopPending - 1);
+        if (currentTalkerId === peerId || (!peer.isTalking && ledRx.classList.contains('active'))) rxAfterStop();
+        rxReconcile(); renderPeers();
+      };
+      const tick = function () {
+        if (!peerMap.has(peerId) || peer.isTalking) { peer.stopWait = 0; rxStopPending = Math.max(0, rxStopPending - 1); return; } // 去った・また話し始めた
+        let quiet = true;
+        try { const d = rxDecoders.get(peerId); if (d) { d.an.getByteFrequencyData(d.freq); quiet = freqQuiet(d.freq); } } catch (_) {}
+        const now = performance.now();
+        if (quiet) { if (!quietSince) quietSince = now; } else quietSince = 0;
+        if ((quietSince && now - quietSince >= 120) || now - t0 > 1500) { fin(); return; }
+        peer.stopWait = setTimeout(tick, 40);
+      };
+      peer.stopWait = setTimeout(tick, 40);
+    }
+    function armTalkTimer(peerId) {
+      const peer = peerMap.get(peerId);
+      if (!peer) return;
+      clearTimeout(peer.talkTimer);
+      peer.talkTimer = setTimeout(function () {
+        const p2 = peerMap.get(peerId);
+        if (!p2 || !p2.isTalking) return;
+        let quiet = true;
+        try { const srcD = rxDecoders.get(peerId); if (srcD) { srcD.an.getByteFrequencyData(srcD.freq); quiet = freqQuiet(srcD.freq); } } catch (_) {}
+        if (!quiet) { armTalkTimer(peerId); return; }
+        p2.isTalking = false;
+        if (currentTalkerId === peerId) rxAfterStop();
+        renderPeers();
+      }, 30000);
+    }
     function onStartReceiving(name) {
       ledRx.classList.add('active');
       statusLabel.textContent = 'RX: ' + name;
@@ -1836,11 +1951,57 @@ const HTML = `<!DOCTYPE html>
     }
 
     let pressed = false;
-    function press() { if (isInviteMode()) { joinInvited(); return; } if (!currentKey) { createFromPtt(); return; } pressed = true; startTransmission(); }
+    function press() { if (ptRoom) { toast('ぽっと通話の部屋にいます。「押している間だけ話す」ボタンで話します'); return; } if (isInviteMode()) { joinInvited(); return; } if (!currentKey) { createFromPtt(); return; } pressed = true; startTransmission(); }
     function release() { pressed = false; stopTransmission(); }
 
     pttBtn.addEventListener('mousedown', function (e) { e.preventDefault(); press(); });
-    window.addEventListener('mouseup', function () { if (pressed) release(); });
+    // ---- メディアボタン（イヤホンのボタン・スピーカーマイクの再生/停止ボタン）で、話す・止めるを切り替える ----
+    // メディアボタンは、「押した」「離した」の 2 つの合図ではなく、再生/停止の指示が 1 回届くだけ。なので、押すたびに、話し始める / 止める の切り替えにする
+    // （スペースキーは、今までどおり、押している間だけ話す）。ブラウザは、音が鳴っているページにしか、メディアボタンを渡さないので、部屋にいる間は、無音を鳴らし続ける
+    let mediaBtnOn = true; try { mediaBtnOn = localStorage.getItem('pochitalk_media_btn') !== '0'; } catch (_) {}
+    let mediaLast = 0;
+    function mediaToggle() {
+      const now = Date.now(); if (now - mediaLast < 400) return; mediaLast = now; // 同じ 1 回の押下が、2 経路から届いても、1 回だけにする
+      if (!mediaBtnOn || !currentKey || !room || ptRoom) return;
+      if (isTransmitting) { mediaLatched = false; pressed = false; stopTransmission(); return; }
+      mediaLatched = true;
+      press();
+      setTimeout(function () { if (!isTransmitting && !startPending) { mediaLatched = false; pressed = false; } }, 3000); // 話中などで始められなかったときは、押した扱いを戻す
+    }
+    (function () {
+      const mc = document.getElementById('mediaBtnCheck');
+      if (mc) { mc.checked = mediaBtnOn; mc.addEventListener('change', function () { mediaBtnOn = mc.checked; try { localStorage.setItem('pochitalk_media_btn', mediaBtnOn ? '1' : '0'); } catch (_) {} }); }
+    })();
+    (function () {
+      if (!('mediaSession' in navigator)) return;
+      let silent = null;
+      function silentUrl() {
+        const sr = 8000, n = sr, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+        function w(o, t) { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); }
+        w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+        return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+      }
+      try {
+        navigator.mediaSession.setActionHandler('play', mediaToggle);
+        navigator.mediaSession.setActionHandler('pause', mediaToggle);
+      } catch (_) {}
+      function keepAlive() {
+        const want = mediaBtnOn && !!currentKey && !!room && !ptRoom;
+        if (want) {
+          if (!silent) { silent = new Audio(silentUrl()); silent.loop = true; silent.setAttribute('playsinline', ''); }
+          try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ぽちっと通話', artist: 'ボタンで 話す / 止める' }); } catch (_) {}
+          if (silent.paused) { const pr = silent.play(); if (pr && pr.catch) pr.catch(function () {}); }
+        } else if (silent && !silent.paused) { silent.pause(); }
+      }
+      setInterval(keepAlive, 2000);
+      window.addEventListener('keydown', function (e) {
+        if (e.key === 'MediaPlayPause' || e.key === 'MediaPlay' || e.key === 'MediaPause') { e.preventDefault(); mediaToggle(); }
+      });
+      window.__pochiMedia = { toggle: mediaToggle }; // 試験用
+    })();
+    let mediaLatched = false;
+    window.addEventListener('mouseup', function () { if (pressed && !(mediaLatched && isTransmitting)) release(); });
     // タッチ操作: スワイプ中に指がボタンに触れても、話し始めないようにする
     //   ・押してから SWIPE_HOLD_MS のあいだ、指がほぼ動かなかったときだけ送信を始める（短いタップでは送信しない）
     //   ・指がボタンの外（SWIPE_MARGIN_PX 余裕あり）に出たらスワイプとみなし、送信を始めない／送信中なら直ちに止める
@@ -2074,6 +2235,35 @@ const HTML = `<!DOCTYPE html>
       morseQueue.push(ch);
       startMorse();
     });
+
+    // ---------- 縦に長い端末では、ダイヤルを画面の下に置く（?dial=bottom で強制 / ?dial=drawer で、ドロワーのまま）----------
+    (function () {
+      const body = document.body;
+      let force = null; try { force = new URLSearchParams(location.search).get('dial'); } catch (_) {}
+      let pref = 'auto'; try { const v = localStorage.getItem('pochitalk_dial_pos'); if (v === 'bottom' || v === 'drawer') pref = v; } catch (_) {}
+      const seg = document.getElementById('dialPosSeg');
+      function syncSeg() { if (seg) seg.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-pos') === pref); }); }
+      function layoutDialBottom() {
+        const sw = (window.screen && window.screen.width) || window.innerWidth, sh = (window.screen && window.screen.height) || window.innerHeight;
+        const ratio = Math.max(sw, sh) / Math.max(1, Math.min(sw, sh));
+        const portrait = window.innerHeight > window.innerWidth;
+        let on = portrait && window.innerWidth <= 700 && ratio >= 2.2;
+        const mode = (force === 'bottom' || force === 'drawer') ? force : pref; // URL の指定が先、次に、設定
+        if (mode === 'bottom') on = window.innerWidth <= 700; else if (mode === 'drawer') on = false;
+        body.classList.toggle('dial-bottom', on);
+        if (on) body.classList.remove('dial-open');
+      }
+      window.addEventListener('resize', layoutDialBottom);
+      window.addEventListener('orientationchange', layoutDialBottom);
+      if (seg) seg.addEventListener('click', function (e) {
+        const b = e.target.closest('.seg-btn'); if (!b) return;
+        pref = b.getAttribute('data-pos');
+        try { localStorage.setItem('pochitalk_dial_pos', pref); } catch (_) {}
+        syncSeg(); layoutDialBottom();
+      });
+      syncSeg();
+      layoutDialBottom();
+    })();
 
     // ---------- 広い画面の並べ方（本体とダイヤルを横並び）と、モールスのキーボード ----------
     (function () {
@@ -2814,6 +3004,7 @@ const HTML = `<!DOCTYPE html>
 
     function tuneKey(key, skipConfirm, isNew) {
       if (isTransmitting) { flashSub('送信中は周波数を変えられません'); return; }
+      if (ptRoom) ptLeave(); // ぽっと通話の部屋にいるときは、先に出る
       if (key !== currentKey) {
         const st0 = roomStats().get(key);
         if (st0 && st0.count >= MAX_ROOM) { toast('この部屋は満員です（' + MAX_ROOM + '人まで）'); return; }
@@ -3248,7 +3439,7 @@ const HTML = `<!DOCTYPE html>
       if (ps) ps.textContent = key ? 'TO TALK' : (inv ? '入室' : '新しい部屋');
     }
     let createGuard = false;
-    function createFromPtt() { if (createGuard || currentKey) return; createGuard = true; setTimeout(function () { createGuard = false; }, 1500); document.getElementById('emptyBtn').click(); }
+    function createFromPtt() { if (createGuard || currentKey || ptRoom) return; createGuard = true; setTimeout(function () { createGuard = false; }, 1500); document.getElementById('emptyBtn').click(); }
     function joinInvited() { if (isInviteMode()) tuneKey(pendingKey, true); }
     function renderInvite(st) {
       placeHomeControls();
@@ -3408,7 +3599,7 @@ const HTML = `<!DOCTYPE html>
       e.preventDefault();
       dialGo(dialIndex() + (e.key === 'ArrowDown' ? 1 : -1));
     });
-    function dialEnter() { const key = dialKeys[dialIndex()]; if (key) tuneKey(key); }
+    function dialEnter() { const key = dialKeys[dialIndex()]; if (!key) return; if (window.__band === 'potalk') { const g = ptGroups().find(function (x) { return x.room === key; }); ptOpenFrame(key, g ? g.rn : ''); return; } tuneKey(key); }
     function dialIdleSoon(ms) {
       clearTimeout(dialTimer);
       dialTimer = setTimeout(function () { dialBusy = false; if (dialPending) { dialPending = false; renderScan(); } }, ms);
@@ -3488,6 +3679,7 @@ const HTML = `<!DOCTYPE html>
     }
 
     function renderScan() {
+      if (window.__band === 'potalk') { try { ptDialToMain(); } catch (_) {} return; } // ぽっと通話のバンドのときは、ぽっと通話の部屋を、同じダイヤルに出す
       const stats = roomStats();
       if (pendingKey && !stats.has(pendingKey)) stats.set(pendingKey, { count: 0, air: false, names: [], invited: true });
       const f = parseSearch();
@@ -4276,6 +4468,385 @@ const HTML = `<!DOCTYPE html>
     // 同意がまだなら、招待のURLで開いたときも、先に案内を出す（同意するまで、ほかの操作はできない）
     if ((!POCHI_NATIVE && !termsOk()) || (getWelcomeOn() && !isKey((urlParams.get('r') || '').trim().toLowerCase()))) openDialog(welcomeDialog);
 
+    // ---------- ぽっと通話（potalk.app）の部屋 ----------
+    // 部屋の一覧の下に、qramo さんの「ぽっと通話」の部屋を並べる。ここから、ぽちっと通話のハンドルネームのまま、直接入れる。
+    // 通信の約束は po_call の docs/PROTOCOL.md（v1.1）に合わせる。
+    //  ・一覧: Trystero の隠し部屋 '__lobby__' に入り、'presence' を受けるだけ（自分は、部屋に入っているときだけ送る）
+    //  ・通話: 部屋 ID をそのまま Trystero の部屋 ID にして入る。profile / meta / nudge などの action を受け答えする
+    //  ・配信部屋（ID に ~pk~ を含む）は、署名つきの名簿などが要るので、まだ扱わない（一覧に出さない）
+    // 注意: 外側がテンプレートリテラルなので、ここでは、バッククォートとバックスラッシュと、ドル記号に波括弧を続けた書き方を使わないこと。
+    const PT_APP_ID = 'kuramo-webrtc-call';
+    const PT_ENTRY_EXPIRE_MS = 30000, PT_PRESENCE_BEAT_MS = 5000, PT_MAX_ENTRIES = 600;
+    const ptEntries = new Map(); // peerId -> { room, rn, tag, tagBy, muted, elapsed, name, emoji, ts, rx }
+    let ptLobby = null, ptSendPresence = null, ptReviving = false, ptBeatTimer = null;
+    let ptRoom = null, ptRoomId = '', ptRoomName = '', ptJoinedAt = 0, ptMic = null, ptJoining = false;
+    let ptSendProfile = null, ptSendMeta = null, ptSendNudge = null, ptSendBye = null;
+    let ptLatched = false, ptHoldOn = false, ptPresenceAt = 0;
+    const ptMembers = new Map(), ptSentStreams = new Map(), ptNudgeSeen = new Map();
+    let ptLobbyOn = true;
+    let bandNow = 'pochi'; try { bandNow = localStorage.getItem('pochitalk_band') === 'potalk' ? 'potalk' : 'pochi'; } catch (_) {}
+    window.__band = bandNow;
+    ptLobbyOn = bandNow === 'potalk'; // ぽっと通話の部屋の一覧は、そちらのバンドにしたときだけ、つなぐ
+
+    function ptClean(s, n) { // 受け取った文字は信用しない: 制御文字を除き、コードポイントで切り詰める
+      return Array.from(String(s == null ? '' : s)).filter(function (c) { const cp = c.codePointAt(0); return cp >= 32 && cp !== 127 && !(cp >= 128 && cp < 160); }).slice(0, n).join('').trim();
+    }
+    function ptRoomIdOk(id) { return typeof id === 'string' && id.length >= 1 && id.length <= 64 && id.indexOf('~pk~') < 0 && id !== '__lobby__'; }
+    function ptTalking() { return ptLatched || ptHoldOn; }
+    function ptElapsed() { return ptJoinedAt ? Math.floor((Date.now() - ptJoinedAt) / 1000) : 0; }
+
+    // 隠し部屋から、他の人の在室の知らせを受ける
+    function ptOnPresence(d, peerId) {
+      if (!peerId || !d || typeof d !== 'object') return;
+      if (!d.room) { if (ptEntries.delete(peerId)) ptRender(); return; }
+      const now = Date.now();
+      const prev = ptEntries.get(peerId);
+      if (prev && now - prev.rx < 800) return; // 連打は間引く
+      if (!prev && ptEntries.size >= PT_MAX_ENTRIES) return;
+      if (!ptRoomIdOk(d.room) || d.bo) { if (ptEntries.delete(peerId)) ptRender(); return; }
+      const el = typeof d.elapsed === 'number' && isFinite(d.elapsed) ? Math.max(0, Math.min(2592000, d.elapsed)) : 0;
+      ptEntries.set(peerId, {
+        room: d.room, rn: ptClean(d.rn, 30), tag: ptClean(d.tag, 30), tagBy: ptClean(d.tagBy, 20), muted: !!d.muted,
+        elapsed: el, name: ptClean(d.name, 20), emoji: ptClean(d.emoji, 8) || '🙂', ts: now, rx: now
+      });
+      ptRender();
+    }
+    function ptLobbyJoin() {
+      if (!ptLobbyOn || ptLobby || ptReviving) return;
+      try {
+        ptLobby = joinRoom({ appId: PT_APP_ID, relayConfig: { urls: ROOM_RELAYS, redundancy: 5, warnOnRelayFailure: false }, rtcConfig: getRtcConfig() }, '__lobby__', { onJoinError: function (d) { try { console.warn('potalk lobby join error:', d && d.error); } catch (_) {} } });
+      } catch (_) { ptLobby = null; return; }
+      const lob = ptLobby;
+      const act = actionOf(lob, 'presence');
+      ptSendPresence = act[0];
+      act[1](function (data, peerId) { if (ptLobby === lob) ptOnPresence(data, peerId); });
+      setHandler(lob, 'onPeerLeave', function (peerId) { if (ptEntries.delete(peerId)) ptRender(); });
+      setHandler(lob, 'onPeerJoin', function () { if (ptRoom) setTimeout(ptAnnounce, 400); ptRender(); }); // 新しく来た人に、すぐ自分の在室を知らせる
+      ptRender();
+    }
+    function ptPcsOf(r) { const out = []; try { const m = r ? r.getPeers() : {}; Object.keys(m).forEach(function (k) { if (m[k]) out.push(m[k]); }); } catch (_) {} return out; }
+    function ptClosePcs(pcs, delay) { setTimeout(function () { pcs.forEach(function (pc) { try { pc.close(); } catch (_) {} }); }, delay || 0); }
+    // 一覧の部屋を作り直す（Trystero は接続を部屋をまたいで使い回すので、ほかの部屋の退出で接続が閉じられたあとなどに使う）
+    function ptRevive() {
+      if (ptReviving) return;
+      ptReviving = true;
+      const old = ptLobby; ptLobby = null; ptSendPresence = null; ptEntries.clear();
+      const pcs = ptPcsOf(old);
+      try { if (old) old.leave(); } catch (_) {}
+      ptClosePcs(pcs, 100);
+      ptRender();
+      setTimeout(function () { ptReviving = false; ptLobbyJoin(); }, 700);
+    }
+    // 他の部屋（ぽちっと通話の部屋）の退出で接続が閉じられたあと、一覧の接続が死んでいたら作り直す
+    function ptAfterClose() { if (ptLobbyOn && !ptReviving && !ptRoom && !ptJoining) ptRevive(); }
+
+    // 自分が部屋に入っているあいだ、隠し部屋に在室を知らせる（これで、ぽっと通話の人の一覧にも出る）
+    function ptAnnounce() {
+      if (!ptRoom || !ptSendPresence) return;
+      const now = Date.now();
+      if (now - ptPresenceAt < 700) return;
+      ptPresenceAt = now;
+      try {
+        ptSendPresence({ room: ptRoomId, rn: ptRoomName, bo: false, muted: !ptTalking(), elapsed: ptElapsed(), talk: ptTalking() ? 2 : 0, tt: false,
+          name: ptClean(myNickname, 20) || 'NoName', emoji: '📻', stage: '' });
+      } catch (_) {}
+    }
+    function ptProfile() {
+      return { name: ptClean(myNickname, 20) || 'NoName', emoji: '📻', muted: !ptTalking(), stage: '', relay: false, since: ptElapsed(), bgm: 'off' };
+    }
+    function ptApplyTalk() {
+      if (ptMic) ptMic.getAudioTracks().forEach(function (t) { t.enabled = ptTalking(); });
+      const talkBtn = document.getElementById('ptTalkBtn'), latch = document.getElementById('ptLatchBtn');
+      talkBtn.classList.toggle('on', ptTalking());
+      latch.textContent = ptLatched ? '🔇 マイクを閉じる' : '🎙 マイクを開けっぱなしにする';
+      try { if (ptRoom && ptSendProfile) ptSendProfile(ptProfile()); } catch (_) {}
+      ptPresenceAt = 0; ptAnnounce();
+      ptRenderPanel();
+    }
+    function ptHold(on) { if (!ptRoom) return; ptHoldOn = !!on; ptApplyTalk(); }
+
+    // 相手に自分の声を渡す。両方が同時に足すと取り決めがぶつかるので、ID の小さい側が先に足す（ぽちっと通話の部屋と同じ）
+    function ptSendStreamTo(peerId) {
+      if (!ptRoom || !ptMic || ptSentStreams.has(peerId)) return;
+      const ms = new MediaStream(ptMic.getTracks());
+      ptSentStreams.set(peerId, ms);
+      try { ptRoom.addStream(ms, { target: peerId }); } catch (_) { ptSentStreams.delete(peerId); }
+    }
+    function ptResendStreamTo(peerId) {
+      if (!ptRoom || !ptMic) return;
+      try {
+        const old = ptSentStreams.get(peerId);
+        if (old) ptRoom.removeStream(old, { target: peerId });
+        const ms = new MediaStream(ptMic.getTracks());
+        ptSentStreams.set(peerId, ms);
+        ptRoom.addStream(ms, { target: peerId });
+      } catch (_) {}
+    }
+
+    async function ptJoin(roomId, roomName) {
+      if (ptRoom || ptJoining || !ptRoomIdOk(roomId)) return;
+      if (isTransmitting) { toast('送信中は、部屋を移れません'); return; }
+      const names = ptGroups().find(function (g) { return g.room === roomId; });
+      const msg = 'ぽっと通話（potalk.app）の部屋に入室しますか？' + String.fromCharCode(10)
+        + '「' + (roomName || '名前なし') + '」' + (names ? '（いま ' + names.count + ' 人）' : '') + String.fromCharCode(10)
+        + 'ハンドルネーム「' + myNickname + '」で入ります。入ったときのマイクはオフです。' + String.fromCharCode(10)
+        + 'ぽっと通話は、ボタンを押さなくても声が届く、別のアプリです。';
+      if (!confirm(msg)) return;
+      ptJoining = true;
+      try {
+        if (currentKey) { leaveRoom(); await wait(900); } // ぽちっと通話の部屋の接続が閉じ終わるのを待つ
+        document.body.classList.remove('dial-open');
+        // マイクは、入る前に確保する（許可されなければ、聞くだけで入る）
+        try {
+          const gum = navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+          const got = await Promise.race([gum, new Promise(function (r) { setTimeout(function () { r(null); }, 20000); })]); // 許可の返事を待ちすぎない
+          if (!got) { gum.then(function (st) { st.getTracks().forEach(function (t) { t.stop(); }); }, function () {}); throw new Error('mic timeout'); } // 遅れて許可されても、使わずに止める
+          ptMic = got;
+          ptMic.getAudioTracks().forEach(function (t) { t.enabled = false; });
+        } catch (_) { ptMic = null; toast('マイクが使えないので、聞くだけで入ります'); }
+        if (iceFetchedAt <= 0) await Promise.race([refreshIceServers(), new Promise(function (r) { setTimeout(r, 4000); })]);
+        if (!ptLobby) ptLobbyJoin();
+        ptRoomId = roomId; ptRoomName = ptClean(roomName, 30); ptJoinedAt = Date.now(); ptLatched = false; ptHoldOn = false;
+        ptMembers.clear(); ptSentStreams.clear(); ptNudgeSeen.clear();
+        const r = joinRoom({ appId: PT_APP_ID, relayConfig: { urls: ROOM_RELAYS, redundancy: 5, warnOnRelayFailure: false }, rtcConfig: getRtcConfig() }, roomId, { onJoinError: function (d) { try { console.warn('potalk join error:', d && d.error); } catch (_) {} } });
+        ptRoom = r;
+        const profA = actionOf(r, 'profile'), metaA = actionOf(r, 'meta'), chatA = actionOf(r, 'chat'), reactA = actionOf(r, 'react');
+        const nudgeA = actionOf(r, 'nudge'), byeA = actionOf(r, 'bye'), peersA = actionOf(r, 'peers');
+        ptSendProfile = profA[0]; ptSendMeta = metaA[0]; ptSendNudge = nudgeA[0]; ptSendBye = byeA[0];
+        profA[1](function (d, peerId) {
+          if (ptRoom !== r || !peerId || !d || typeof d !== 'object') return;
+          ptMembers.set(peerId, { name: ptClean(d.name, 20) || 'NoName', emoji: ptClean(d.emoji, 8) || '🙂', muted: d.muted !== false });
+          ptRenderPanel();
+        });
+        // 知らない・使わない action は、受けても何もしない（ひとこと・リアクションなどは、まだ扱わない）
+        metaA[1](function () {}); chatA[1](function () {}); reactA[1](function () {}); byeA[1](function () {}); peersA[1](function () {});
+        nudgeA[1](function (d, peerId) { // 「音が届いていないので送り直して」: 4 秒に 1 回だけ応じる
+          if (ptRoom !== r || !peerId || !ptMembers.has(peerId)) return;
+          const now = Date.now();
+          if (now - (ptNudgeSeen.get(peerId) || 0) < 4000) return;
+          ptNudgeSeen.set(peerId, now);
+          ptResendStreamTo(peerId);
+        });
+        setHandler(r, 'onPeerJoin', function (peerId) {
+          if (ptRoom !== r) return;
+          ptMembers.set(peerId, { name: '接続中...', emoji: '🙂', muted: true });
+          try { ptSendProfile(ptProfile(), peerId); if (ptRoomName) ptSendMeta({ name: ptRoomName }, peerId); } catch (_) {}
+          setTimeout(function () { if (ptRoom === r && ptMembers.has(peerId)) ptSendStreamTo(peerId); }, selfId < peerId ? 0 : 2500);
+          ptRenderPanel();
+        });
+        setHandler(r, 'onPeerLeave', function (peerId) {
+          ptMembers.delete(peerId); ptSentStreams.delete(peerId); ptNudgeSeen.delete(peerId);
+          const el = document.getElementById('ptaudio-' + peerId); if (el) el.remove();
+          ptRenderPanel();
+        });
+        setHandler(r, 'onPeerStream', function (stream, peerId) {
+          if (ptRoom !== r || !stream) return;
+          let el = document.getElementById('ptaudio-' + peerId);
+          if (!el) {
+            el = document.createElement('audio'); el.id = 'ptaudio-' + peerId; el.autoplay = true; el.playsInline = true;
+            el.muted = !!speakerMuted;
+            document.body.appendChild(el);
+          }
+          el.srcObject = stream;
+          el.play().catch(function () { toast('音が止まっています。画面をどこかタップすると鳴ります'); });
+        });
+        clearInterval(ptBeatTimer); ptBeatTimer = setInterval(function () { ptPresenceAt = 0; ptAnnounce(); ptRenderPanel(); }, PT_PRESENCE_BEAT_MS);
+        ptPresenceAt = 0; ptAnnounce();
+        ptApplyTalk();
+        ptRender();
+      } catch (err) {
+        try { console.warn('potalk join failed:', err); } catch (_) {}
+        ptTeardown();
+        toast('ぽっと通話の部屋に入れませんでした');
+      } finally { ptJoining = false; }
+    }
+
+    // 退出: 後片づけ。ぽちっと通話の部屋への入室(tuneKey)からも呼ぶので、同期で終える
+    function ptTeardown() {
+      const r = ptRoom;
+      ptRoom = null;
+      clearInterval(ptBeatTimer); ptBeatTimer = null;
+      if (r) {
+        try { if (ptSendBye) ptSendBye(1); } catch (_) {}
+        try { if (ptSendPresence) ptSendPresence({ room: null }); } catch (_) {}
+      }
+      const pcs = ptPcsOf(r).concat(ptPcsOf(ptLobby));
+      const lob = ptLobby;
+      ptLobby = null; ptSendPresence = null; ptEntries.clear();
+      ptReviving = true;
+      setTimeout(function () { try { if (r) r.leave(); } catch (_) {} try { if (lob) lob.leave(); } catch (_) {} }, 250); // 退出の知らせが先に出るように、少し待つ
+      ptClosePcs(pcs, 450); // この部屋と一覧の接続だけ閉じる（ぽちっと通話の部屋の接続には触らない）
+      setTimeout(function () { ptReviving = false; ptLobbyJoin(); }, 900);
+      try { if (ptMic) ptMic.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
+      ptMic = null; ptLatched = false; ptHoldOn = false;
+      ptSendProfile = null; ptSendMeta = null; ptSendNudge = null; ptSendBye = null;
+      ptMembers.clear(); ptSentStreams.clear(); ptNudgeSeen.clear();
+      document.querySelectorAll('audio[id^="ptaudio-"]').forEach(function (a) { a.remove(); });
+      ptRoomId = ''; ptRoomName = ''; ptJoinedAt = 0;
+      ptRender(); ptRenderPanel();
+    }
+    function ptLeave() { if (ptRoom) ptTeardown(); }
+    window.addEventListener('pagehide', function () {
+      if (!ptRoom) return;
+      try { if (ptSendBye) ptSendBye(1); } catch (_) {}
+      try { if (ptSendPresence) ptSendPresence({ room: null }); } catch (_) {}
+    });
+
+    // ---------- 表示 ----------
+    function ptGroups() {
+      const by = new Map();
+      ptEntries.forEach(function (v) {
+        const g = by.get(v.room) || { room: v.room, rn: '', tag: '', tagBy: '', count: 0, names: [], elapsed: 0, ts: 0 };
+        g.count++;
+        if (!g.rn && v.rn) g.rn = v.rn;
+        if (v.tag && v.ts >= g.ts) { g.tag = v.tag; g.tagBy = v.tagBy; }
+        if (v.elapsed > g.elapsed) g.elapsed = v.elapsed;
+        g.ts = Math.max(g.ts, v.ts);
+        if (v.name) g.names.push({ name: v.name, emoji: v.emoji, muted: v.muted });
+        by.set(v.room, g);
+      });
+      return Array.from(by.values()).sort(function (a, b) { return b.count - a.count || a.rn.localeCompare(b.rn); });
+    }
+    function ptRender() {
+      const box = document.getElementById('ptLobbyBox'), list = document.getElementById('ptList'), cnt = document.getElementById('ptCount');
+      if (!box) return;
+      document.getElementById('ptToggle').checked = ptLobbyOn;
+      if (window.__band === 'potalk' && !document.body.classList.contains('pt-open')) { try { ptDialToMain(); } catch (_) {} }
+      list.replaceChildren();
+      if (!ptLobbyOn) { cnt.textContent = ''; return; }
+      const groups = ptGroups();
+      let total = 0; groups.forEach(function (g) { total += g.count; });
+      cnt.textContent = '👥 ' + total + '人 / ' + groups.length + '部屋';
+      if (!groups.length) {
+        const e = document.createElement('div'); e.className = 'pt-empty';
+        e.textContent = ptLobby ? 'ぽっと通話の部屋を探しています…（誰もいないときは、空のままです）' : 'ぽっと通話につなぎ直しています…';
+        list.appendChild(e); return;
+      }
+      groups.forEach(function (g) {
+        const row = document.createElement('div'); row.className = 'pt-item' + (g.room === ptRoomId ? ' me' : '');
+        const head = document.createElement('div'); head.className = 'pt-head';
+        const title = document.createElement('b'); title.textContent = g.rn || '（名前なしの部屋）';
+        const meta = document.createElement('span'); meta.className = 'pt-meta'; meta.textContent = g.count + '人' + (g.elapsed > 0 ? '・' + fmtElapsed(g.elapsed * 1000) : '');
+        head.append(title, meta);
+        row.appendChild(head);
+        if (g.tag) { const t = document.createElement('div'); t.className = 'pt-tag'; t.textContent = '🏷 ' + g.tag + (g.tagBy ? '（' + g.tagBy + 'が付けた）' : ''); row.appendChild(t); }
+        if (g.names.length) {
+          const who = document.createElement('div'); who.className = 'pt-who';
+          g.names.slice(0, 8).forEach(function (n) { const s = document.createElement('span'); s.textContent = n.emoji + ' ' + n.name + (n.muted ? '' : ' 🎙'); who.appendChild(s); });
+          if (g.names.length > 8) { const s = document.createElement('span'); s.textContent = '他 ' + (g.names.length - 8) + '人'; who.appendChild(s); }
+          row.appendChild(who);
+        }
+        const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn-sub';
+        if (g.room === ptRoomId) { btn.textContent = '参加中'; btn.disabled = true; }
+        else { btn.textContent = '「' + myNickname + '」で入る'; btn.addEventListener('click', function () { ptJoin(g.room, g.rn); }); }
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
+    }
+    function ptRenderPanel() {
+      const panel = document.getElementById('ptPanel');
+      if (!panel) return;
+      panel.classList.toggle('hidden', !ptRoom);
+      if (!ptRoom) return;
+      document.getElementById('ptPanelName').textContent = '📻 ' + (ptRoomName || '（名前なしの部屋）');
+      document.getElementById('ptPanelTime').textContent = ptMic ? '' : '聞くだけ（マイクなし）';
+      const box = document.getElementById('ptMembers'); box.replaceChildren();
+      const me = document.createElement('span'); me.textContent = '📻 ' + myNickname + '（自分）' + (ptTalking() ? ' 🎙' : ' 🔇'); box.appendChild(me);
+      ptMembers.forEach(function (m) { const s = document.createElement('span'); s.textContent = m.emoji + ' ' + m.name + (m.muted ? ' 🔇' : ' 🎙'); box.appendChild(s); });
+    }
+
+    document.getElementById('ptToggle').addEventListener('change', function () {
+      ptLobbyOn = this.checked;
+      if (ptLobbyOn) ptLobbyJoin();
+      else if (!ptRoom) { const old = ptLobby; ptLobby = null; ptSendPresence = null; ptEntries.clear(); ptClosePcs(ptPcsOf(old), 100); try { if (old) old.leave(); } catch (_) {} }
+      ptRender();
+    });
+    const dialTitleText = (document.querySelector('#dialTitle span') || {}).textContent || '';
+    function applyBand(save) {
+      const potalk = bandNow === 'potalk';
+      window.__band = bandNow;
+      const q = document.querySelector('#dialTitle span'); if (q) q.textContent = potalk ? 'ぽっと通話の部屋（赤い線でタップ）' : dialTitleText;
+      ['searchInput', 'dialDetail'].forEach(function (id) { const el = document.getElementById(id); if (el) el.style.display = potalk ? 'none' : ''; });
+      document.getElementById('ptLobbyBox').style.display = 'none'; // 一覧は、ダイヤルで出す
+      document.getElementById('bandPochi').classList.toggle('on', !potalk);
+      document.getElementById('bandPotalk').classList.toggle('on', potalk);
+      document.getElementById('bandPochi').setAttribute('aria-pressed', String(!potalk));
+      document.getElementById('bandPotalk').setAttribute('aria-pressed', String(potalk));
+      if (save) { try { localStorage.setItem('pochitalk_band', bandNow); } catch (_) {} }
+      try { renderScan(); } catch (_) {}
+    }
+    function setBand(b) {
+      if (bandNow === b) return;
+      bandNow = b;
+      const t = document.getElementById('ptToggle'); t.checked = (b === 'potalk'); t.dispatchEvent(new Event('change'));
+      applyBand(true);
+    }
+    document.getElementById('bandPochi').addEventListener('click', function () { setBand('pochi'); });
+    document.getElementById('bandPotalk').addEventListener('click', function () { setBand('potalk'); });
+    // ---- ぽっと通話の部屋を、ぽちっと通話と同じダイヤルに並べる ----
+    function ptDialToMain() {
+      if (dialBusy) { dialPending = true; return; }
+      const groups = ptGroups();
+      let total = 0; groups.forEach(function (g) { total += g.count; });
+      onlineCount.textContent = '👥 ' + total + '人 / ' + groups.length + '部屋';
+      const prev = dialKeys[dialIndex()];
+      scanList.textContent = ''; dialKeys = groups.map(function (g) { return g.room; });
+      if (!groups.length) {
+        const none = document.createElement('div'); none.className = 'rdial-empty';
+        none.textContent = ptLobby ? 'ぽっと通話の部屋を探しています…（誰もいないときは、空のままです）' : 'ぽっと通話につなぎ直しています…';
+        scanList.appendChild(none); dialLastIdx = -1; return;
+      }
+      groups.forEach(function (g, i) {
+        const b = document.createElement('div'); b.className = 'rdial-item'; b.setAttribute('role', 'option'); b.dataset.key = g.room;
+        const head = document.createElement('div'); head.textContent = '📻 ' + (g.rn || '（名前なしの部屋）') + ' · 👤' + g.count; b.appendChild(head);
+        const opn = document.createElement('div'); opn.className = 'chip-open'; opn.textContent = g.elapsed > 0 ? '⏱ 開いてから ' + fmtElapsed(g.elapsed * 1000) : ''; b.appendChild(opn);
+        if (g.tag) { const tg = document.createElement('div'); tg.className = 'chip-tag'; tg.textContent = '🏷 ' + g.tag + (g.tagBy ? '（' + g.tagBy + '）' : ''); b.appendChild(tg); }
+        const who = document.createElement('div'); who.className = 'chip-who';
+        who.textContent = g.names.map(function (m) { return m.emoji + ' ' + m.name + (m.muted ? '' : ' 🎙'); }).join('、');
+        b.appendChild(who);
+        b.addEventListener('click', function () { if (i === dialIndex()) ptOpenFrame(g.room, g.rn); else dialGo(i); });
+        scanList.appendChild(b);
+      });
+      let at = prev ? dialKeys.indexOf(prev) : 0; if (at < 0) at = 0;
+      dialProgrammatic = true; scanList.scrollTop = at * DIAL_ROW; dialLastIdx = at; dialUpdate();
+      setTimeout(function () { dialProgrammatic = false; }, 120);
+    }
+    setInterval(function () { if (window.__band === 'potalk' && !document.body.classList.contains('pt-open')) { try { ptDialToMain(); } catch (_) {} } }, 15000);
+    // ---- 部屋を選んだら、ぽっと通話の画面（potalk.app）を、そのまま開く（/pot/#room=... のページ。左上に、ぽちっと通話へ戻るボタン）----
+    function ptOpenFrame(roomId, roomName) {
+      if (!ptRoomIdOk(roomId)) return;
+      if (isTransmitting) { toast('送信中は、部屋を移れません'); return; }
+      const NL = String.fromCharCode(10);
+      const g = ptGroups().find(function (x) { return x.room === roomId; });
+      if (!window.confirm('ぽっと通話（potalk.app）の部屋に入室しますか？' + NL + '「' + (roomName || '名前なし') + '」' + (g ? '（いま ' + g.count + ' 人）' : '') + NL + 'ぽっと通話の画面を、そのまま開きます。ハンドルネームなどは、ぽっと通話側の設定になります。' + NL + 'ぽっと通話は、ボタンを押さなくても声が届く、別のアプリです。')) return;
+      try { localStorage.setItem('pochitalk_band', 'pochi'); } catch (_) {} // 戻ってきたときは、ぽちっと通話の画面から
+      try { const pr = JSON.parse(localStorage.getItem('pot-call-profile') || '{}') || {}; pr.name = String(myNickname || '').slice(0, 20); localStorage.setItem('pot-call-profile', JSON.stringify(pr)); } catch (_) {} // ハンドルネームを、ぽっと通話（同じドメインで配る写し）へ引き継ぐ
+      location.href = '/pot/#room=' + encodeURIComponent(roomId) + '&name=' + encodeURIComponent(roomName || '');
+    }
+    applyBand(false);
+    document.getElementById('ptLeaveBtn').addEventListener('click', function () { ptLeave(); });
+    document.getElementById('ptLatchBtn').addEventListener('click', function () { ptLatched = !ptLatched; ptApplyTalk(); });
+    (function () {
+      const b = document.getElementById('ptTalkBtn');
+      b.addEventListener('pointerdown', function (e) { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch (_) {} ptHold(true); });
+      ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (ev) { b.addEventListener(ev, function () { ptHold(false); }); });
+      b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    })();
+    // スペースキーでも話せる（入力欄・ダイアログの外で）
+    window.addEventListener('keydown', function (e) {
+      if (e.code !== 'Space' || !ptRoom || e.repeat || isTyping() || document.querySelector('dialog[open]')) return;
+      const f = document.activeElement; if (f && (f.tagName === 'BUTTON' || f.tagName === 'A')) return;
+      e.preventDefault(); ptHold(true);
+    });
+    window.addEventListener('keyup', function (e) { if (e.code === 'Space' && ptHoldOn) { e.preventDefault(); ptHold(false); } });
+    // 期限切れの在室を消す
+    setInterval(function () {
+      const now = Date.now(); let ch = false;
+      ptEntries.forEach(function (v, k) { if (now - v.ts > PT_ENTRY_EXPIRE_MS) { ptEntries.delete(k); ch = true; } });
+      if (ch) ptRender();
+    }, 5000);
+    function ptStart() { ptRender(); ptRenderPanel(); ptLobbyJoin(); }
+
     (async function init() {
       const p = (urlParams.get('r') || '').trim().toLowerCase();
       pendingKey = isKey(p) ? p : null;
@@ -4284,6 +4855,7 @@ const HTML = `<!DOCTYPE html>
       setInterval(function () { refreshIceServers(false); }, 5 * 60 * 1000); // 通話中も資格情報を新しく保つ
       rejoinAfterReload();
       joinLobby();
+      ptStart();
       renderScan();
     })();
   </script>
@@ -4305,7 +4877,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-11-z12q42（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
+const APP_VERSION = '2026-11-17-z12q55（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
@@ -4313,6 +4885,22 @@ const TRYSTERO_B64 = 'LyogZXNtLnNoIC0gdHJ5c3Rlcm9AMC4yNS40L25vc3RyICovCnZhciBTdD
 
 
 // ---- おうむ返しボット用のページ（/bot）----
+const POT_HTML = `<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><meta name="robots" content="noindex"><title>ぽっと通話（ぽちっと通話から）</title>
+<style>html,body{margin:0;height:100%;background:#f4f7fb}
+#bar{position:fixed;left:0;right:0;top:0;height:44px;display:flex;align-items:center;justify-content:center;padding:0 12px;box-sizing:border-box;z-index:2}
+#barIn{width:100%;max-width:898px;display:flex}
+@media (max-width:939px){#barIn{max-width:440px}}
+@media (max-width:560px){#barIn{max-width:none}}
+#back{font-weight:700;font-size:14px;color:#0f172a;background:#e2e8f0;border-radius:999px;padding:8px 16px;text-decoration:none;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:nowrap}
+#back:hover{background:#cbd5e1}
+#f{position:fixed;left:0;right:0;top:44px;width:100%;height:calc(100% - 44px);border:0;background:#f4f7fb}</style></head>
+<body><div id="bar"><div id="barIn"><a id="back" href="/">‹ ぽちっと通話に戻る</a></div></div>
+<iframe id="f" title="ぽっと通話" allow="microphone; autoplay; clipboard-write" referrerpolicy="no-referrer"></iframe>
+<script>
+(function () { var f = document.getElementById('f'); function go() { f.src = 'https://potalk.app/' + location.hash; } go(); window.addEventListener('hashchange', go); })();
+</script></body></html>`;
+
 const BOT_HTML = `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -4839,12 +5427,73 @@ async function handleTurn(request, url, env) {
   return new Response(body, { status: res.status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 
+// ---------- ぽっと通話（potalk.app）のページを、写して配る（/pot/）----------
+// qramo さんの「ぽっと通話」（MIT License・https://github.com/qramo/po_call）のページを、都度取ってきて、ここから配る。
+// 更新があれば、数分で追いつく（キャッシュは数分〜）。置き換えは次の 5 つだけ。1 つでも当たらなければ、写しはやめて、
+// 本物のページを枠で開くだけの版（POT_HTML）に切り替える（上流が変わった合図）。
+//  1. TURN の資格情報の取得先を、この Worker（/api/turn）に変える（向こうの TURN は potalk.app 以外には使えない決まり。迂回はしない）
+//  2. ホスト名で「ベータ版」の見た目に変わる判定を、止める
+//  3. 向こうのアクセス解析のタグを外す（こちらのアクセスを、向こうの解析に送らない）
+//  4. ルート直下の参照（/favicon.ico）を /pot/ 以下に直す
+//  5. 左の列の上に「ぽちっと通話に戻る」ボタンと、出典の表示を足す
+const POT_UP = 'https://potalk.app';
+const POT_INJECT = '<style>#pochiBack{display:block;margin:0 0 12px;padding:9px 14px;border-radius:12px;background:rgba(100,116,139,.18);color:inherit;font-weight:700;font-size:14px;text-decoration:none;text-align:left}#pochiBack:hover{background:rgba(100,116,139,.3)}#pochiCredit{margin-top:10px}</style>'
+  + '<script>(function(){function go(){var c=document.querySelector(".wrap .card");if(c&&!document.getElementById("pochiBack")){var a=document.createElement("a");a.id="pochiBack";a.href="/";a.textContent="\u2039 ぽちっと通話に戻る";c.insertBefore(a,c.firstChild);}'
+  + 'if(!document.getElementById("pochiCredit")){var d=document.createElement("div");d.id="pochiCredit";d.className="legal";d.innerHTML="ぽっと通話（potalk.app）のページを、MIT License のもと、写して配信しています。© qramo \u2014 <a href=\\"https://github.com/qramo/po_call\\" target=\\"_blank\\" rel=\\"noopener noreferrer\\">github.com/qramo/po_call</a>　通話の中継（TURN）は、ぽちっと通話のものを使います。";document.body.appendChild(d);}}'
+  + 'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",go);else go();})();</script>';
+function potPatch(html) {
+  let s = html;
+  const miss = [];
+  function all(a, b) { if (s.indexOf(a) < 0) { miss.push(a.slice(0, 40)); return; } s = s.split(a).join(b); }
+  all("const TURN_WORKER_URL = 'https://pot-turn.itsuma-kuramoto.workers.dev/'", "const TURN_WORKER_URL = '/api/turn'");
+  all("location.hostname !== 'potalk.app'", 'false');
+  all('href="/favicon.ico"', 'href="/pot/favicon.ico"');
+  all("location.href = 'ptt/?r=' + ch", "location.href = '/?r=' + ch"); // 🔘（ぽちっと通話の部屋）は、向こうの写しの /ptt/ ではなく、こちらの本体へ（行ったり来たりの輪を作らない）
+  const beacon = /<script[^>]*static\.cloudflareinsights\.com[^>]*><\/script>/g;
+  if (!beacon.test(s)) miss.push('beacon'); else s = s.replace(beacon, '');
+  if (s.indexOf('</body>') < 0) miss.push('</body>'); else s = s.replace('</body>', POT_INJECT + '</body>');
+  return miss.length ? null : s;
+}
+async function potCached(upUrl, ttl) {
+  const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
+  const key = new Request(upUrl);
+  if (cache) { try { const hit = await cache.match(key); if (hit) return hit; } catch (_) {} }
+  const res = await fetch(upUrl, { headers: { 'User-Agent': 'pochitalk-pot-mirror (+https://github.com/riryo3/pochittalk)' } });
+  if (!res.ok) return res;
+  const out = new Response(res.body, { status: res.status, headers: { 'Content-Type': res.headers.get('Content-Type') || 'application/octet-stream', 'Cache-Control': 'public, max-age=' + ttl } });
+  if (cache) { try { await cache.put(key, out.clone()); } catch (_) {} }
+  return out;
+}
+async function handlePot(request, url) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('method not allowed', { status: 405 });
+  const path = url.pathname.slice(4) || '/';
+  if (path === '/ptt' || path.indexOf('/ptt/') === 0) return Response.redirect(url.origin + '/' + url.search, 302); // /pot/ptt/?r=部屋 は、こちらの本体の部屋（/?r=部屋）へ。写しの中に、もう一つの写しを作らない
+  const fallback = function () { return new Response(POT_HTML, { headers: { 'Content-Type': 'text/html;charset=UTF-8', 'Cache-Control': 'no-cache' } }); };
+  if (path === '/' || path === '/index.html') {
+    try {
+      const res = await potCached(POT_UP + '/', 300);
+      if (!res.ok) return fallback();
+      const patched = potPatch(await res.text());
+      if (!patched) return fallback();
+      return new Response(patched, { headers: { 'Content-Type': 'text/html;charset=UTF-8', 'Cache-Control': 'no-cache' } });
+    } catch (_) { return fallback(); }
+  }
+  if (path.indexOf('..') >= 0 || path.indexOf('//') >= 0 || !/^[A-Za-z0-9._~\-\/%@+]+$/.test(path)) return new Response('not found', { status: 404 });
+  try {
+    const long = /^\/(models|images|img|vendor)\//.test(path);
+    const res = await potCached(POT_UP + path + url.search, long ? 86400 : 600);
+    return new Response(res.body, { status: res.status, headers: { 'Content-Type': res.headers.get('Content-Type') || 'application/octet-stream', 'Cache-Control': 'public, max-age=' + (long ? 3600 : 300) } });
+  } catch (_) { return new Response('upstream error', { status: 502 }); }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/api/turn') return handleTurn(request, url, env);
     if (url.pathname === '/version') return new Response(JSON.stringify({ version: APP_VERSION, trystero: '0.25.4' }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
     if (url.pathname === '/vendor/trystero-0.25.4-p9.mjs') return new Response(bytes(TRYSTERO_B64), { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+    if (url.pathname === '/pot') return Response.redirect(url.origin + '/pot/' + url.search, 302);
+    if (url.pathname.indexOf('/pot/') === 0) return handlePot(request, url);
     if (url.pathname === '/bot') return new Response(BOT_HTML.split('__VERSION__').join(APP_VERSION), { headers: { 'Content-Type': 'text/html;charset=UTF-8', 'Cache-Control': 'no-cache' } });
     switch (url.pathname) {
       case '/favicon.svg':

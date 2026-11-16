@@ -25,6 +25,7 @@ import app.pochitalk.engine.formatKey
  */
 class CallService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
+    private var mediaSession: android.media.session.MediaSession? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -49,11 +50,44 @@ class CallService : Service() {
                 acquire(WAKE_LOCK_MAX_MS)
             }
         }
+        startMediaSession()
         isRunning = true
         return START_NOT_STICKY
     }
 
+    /** メディアボタン (イヤホンのボタンなど) を、入室中だけ受ける。画面が消えていても、このサービスが生きている間は届く。 */
+    private fun startMediaSession() {
+        if (mediaSession != null) return
+        val s = android.media.session.MediaSession(this, "pochitalk")
+        s.setCallback(object : android.media.session.MediaSession.Callback() {
+            override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                if (!PochiEngine.mediaBtnOn) return false
+                @Suppress("DEPRECATION")
+                val ev = mediaButtonIntent.getParcelableExtra<android.view.KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
+                when (ev.keyCode) {
+                    android.view.KeyEvent.KEYCODE_HEADSETHOOK, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                        if (ev.action == android.view.KeyEvent.ACTION_DOWN && ev.repeatCount == 0) PochiEngine.mediaKeyDown()
+                        else if (ev.action == android.view.KeyEvent.ACTION_UP) PochiEngine.mediaKeyUp()
+                        return true
+                    }
+                }
+                return false
+            }
+        })
+        s.setMetadata(android.media.MediaMetadata.Builder().putString(android.media.MediaMetadata.METADATA_KEY_TITLE, getString(R.string.app_name)).build())
+        val actions = android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE or android.media.session.PlaybackState.ACTION_PLAY_PAUSE
+        s.setPlaybackState(
+            android.media.session.PlaybackState.Builder().setActions(actions)
+                .setState(android.media.session.PlaybackState.STATE_PLAYING, 0L, 1f).build(),
+        )
+        s.isActive = true
+        mediaSession = s
+    }
+
     override fun onDestroy() {
+        mediaSession?.let { it.isActive = false; it.release() }
+        mediaSession = null
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         isRunning = false

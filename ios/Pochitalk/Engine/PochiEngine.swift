@@ -78,6 +78,8 @@ final class PochiEngine: ObservableObject {
     private var roomTagAction: TrysteroRoom.Action?
     private let morseRx = MorseDecoder()
     private let faxRx = FaxReceiver()
+    private let mediaButtons = MediaButtons()
+    private var lastMediaToggle = 0
     private var toneJob: Job?
     private final class PeerState {
         var name: String; var talking: Bool; var joinJudged = false; var enteredAt = 0
@@ -144,6 +146,8 @@ final class PochiEngine: ObservableObject {
             st.welcomeOn = defaults.string(forKey: "pochitalk_welcome") != "off"
             st.notifyRoom = defaults.string(forKey: "pochitalk_notify_room") == "on"
             st.logRec = defaults.string(forKey: "pochitalk_log_rec") == "on"
+            st.mediaBtn = defaults.object(forKey: "pochitalk_media_btn") as? Bool ?? true // 初期はオン
+            mediaButtons.onToggle = { [weak self] in self?.mediaToggle() }
             launchMs = RT.nowMs()
             if st.logRec { logBuffer = defaults.stringArray(forKey: "pochitalk_diag_log") ?? [] }
             let sfx = min(150, max(0, defaults.object(forKey: "pochitalk_sfx_vol") as? Int ?? 100))
@@ -484,6 +488,7 @@ final class PochiEngine: ObservableObject {
 
         connectRoom(n, key)
         enterAudioSession()
+        if st.mediaBtn { mediaButtons.enable() } // 入室中だけ、メディアボタンを受ける
         resetStatus()
         st.currentKey = key
         st.pendingKey = nil
@@ -572,6 +577,7 @@ final class PochiEngine: ObservableObject {
     private func leaveInternal(keepAudio: Bool) {
         if room == nil && currentKey == nil { return }
         if isTransmitting { pressed = false; stopTransmission() }
+        mediaButtons.disable() // 退室したら、他の音楽アプリに返す
         room?.leave()
         room = nil
         pttStateAction = nil; pttNameAction = nil; roomTagAction = nil; faxPageAction = nil
@@ -877,6 +883,35 @@ final class PochiEngine: ObservableObject {
     /// スワイプと判定した: 送信中なら、終了音を鳴らさずにすぐ止める。
     func pttAbort() { RT.post { [self] in pressed = false; stopTransmission(quiet: true) } }
 
+    /// メディアボタン (イヤホン・スピーカーマイク・Mac の再生キー): 押すたびに、話し始める / 止める。
+    /// 部屋にいるときだけ。話中なら、いつもの押下と同じ (話中の音)。始められなかったら、押した扱いを戻す。400ms 以内の二重は無視。
+    func mediaToggle() {
+        RT.post { [self] in
+            guard st.mediaBtn, currentKey != nil, room != nil else { return }
+            let now = RT.nowMs()
+            if now - lastMediaToggle < 400 { return }
+            lastMediaToggle = now
+            if isTransmitting {
+                pressed = false
+                stopTransmission()
+            } else {
+                pressed = true
+                startTransmission(quiet: false)
+                if !isTransmitting { pressed = false }
+            }
+        }
+    }
+
+    /// 設定: メディアボタンで、話す・止めるを切り替える (初期オン)。
+    func setMediaBtn(_ on: Bool) {
+        RT.post { [self] in
+            st.mediaBtn = on
+            defaults.set(on, forKey: "pochitalk_media_btn")
+            if on { if currentKey != nil { mediaButtons.enable() } } else { mediaButtons.disable() }
+            commit()
+        }
+    }
+
     func pttRelease() { RT.post { [self] in pressed = false; stopTransmission() } }
 
     // ================================================================ モールス送信 (Web 版 startMorse の移植)
@@ -1158,6 +1193,7 @@ final class PochiEngine: ObservableObject {
         diag("受信: \(peerId.prefix(5)) talking=\(talking)")
         p?.talking = talking
         if talking {
+            cancelRxStopWait()
             currentTalkerId = peerId
             morseRx.reset()
             if isTransmitting {
@@ -1173,7 +1209,11 @@ final class PochiEngine: ObservableObject {
             }
         } else if currentTalkerId == peerId {
             RT.after(600) { [self] in morseRx.flush() } // 音声の末尾が届き切ってから確定する
-            onStopReceiving()
+            if othersTalking() == 0 && !isTransmitting && room != nil {
+                beginRxStopWait(peerId)
+            } else {
+                onStopReceiving()
+            }
         }
         renderPeers()
     }
@@ -1198,7 +1238,46 @@ final class PochiEngine: ObservableObject {
 
     private func onStartReceiving(_ name: String) { setStatus(.rx, "RX: \(name)", ledTx: st.ledTx, ledRx: true) }
 
+    private var rxStopTimer: Job?
+    private var rxStopGen = 0
+
+    private func cancelRxStopWait() {
+        rxStopGen += 1
+        rxStopTimer?.cancel()
+        rxStopTimer = nil
+    }
+
+    /// 合図は音声より先に届く。その相手の受信音が約120ms続けて静かになる(最長1.5秒)まで、RX表示と終了音を待つ。
+    private func beginRxStopWait(_ peerId: String) {
+        cancelRxStopWait()
+        let gen = rxStopGen
+        let start = RT.nowMs()
+        var quietSince: Int? = nil
+        var fetching = false
+        rxStopTimer = RT.every(40) { [self] in
+            guard gen == rxStopGen else { return }
+            let now = RT.nowMs()
+            if currentTalkerId != peerId || room == nil { cancelRxStopWait(); return }
+            func finish() { cancelRxStopWait(); onStopReceiving(); renderPeers() }
+            if now - start >= 1500 { return finish() }
+            if fetching { return }
+            fetching = true
+            room?.fetchInboundAudioLevel(peerId: peerId) { [self] level in
+                fetching = false
+                guard gen == rxStopGen else { return }
+                let t = RT.nowMs()
+                if (level ?? 0) < 0.003 {
+                    if quietSince == nil { quietSince = t }
+                    if t - quietSince! >= 120 { finish() }
+                } else {
+                    quietSince = nil
+                }
+            }
+        }
+    }
+
     private func onStopReceiving() {
+        cancelRxStopWait()
         currentTalkerId = nil
         st.ledRx = false
         if !isTransmitting {

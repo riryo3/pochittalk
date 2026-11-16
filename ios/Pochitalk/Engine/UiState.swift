@@ -67,6 +67,8 @@ struct UiState: Equatable {
     var welcomeOn = true
     /// 新しい部屋ができたら、音で知らせる
     var notifyRoom = false
+    /// メディアボタン (イヤホンのボタンなど) で、話す・止めるを切り替える
+    var mediaBtn = true
     /// 通信の記録を、この端末に残す (オンの間は、名前の前に 💾 が付く)
     var logRec = false
     var roomTag = ""

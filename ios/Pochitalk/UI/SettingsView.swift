@@ -47,6 +47,10 @@ struct SettingsView: View {
                     }
                     Text("スライダーを離すと、試しに発話終了の「ガッ」と鳴ります。効果音を消したいときは、音量を 0% にしてください。").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("メディアボタン") {
+                    Toggle("メディアボタン（イヤホンのボタンなど）で、話す・止めるを切り替える", isOn: Binding(get: { ui.mediaBtn }, set: { engine.setMediaBtn($0) }))
+                    Text("メディアボタンは、押した・離したが分からないので、押すたびに「話す」「止める」を切り替えます。スペースキーは、押している間だけ話します。部屋にいる間だけ働き、部屋を出ると、ほかの音楽アプリに返します。").font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("新しい部屋") {
                     Toggle("新しい部屋ができたら、音で知らせる", isOn: Binding(get: { ui.notifyRoom }, set: { engine.setNotifyRoom($0) }))
                     Text("音だけで知らせます（画面の知らせや、OS の通知は出しません）。効果音がオンのときに鳴ります。オンにすると、確かめに1回鳴ります。").font(.footnote).foregroundStyle(.secondary)
