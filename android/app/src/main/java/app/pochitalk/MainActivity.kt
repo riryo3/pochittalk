@@ -66,6 +66,16 @@ class MainActivity : ComponentActivity() {
 
     // 画面の部品より先にキーを見る (Compose のフォーカスがキーを先に食べるのを避ける)。文字入力中は、通常の入力に任せる
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        when (event.keyCode) { // メディアボタン (画面が前にあるとき、直接届く場合の保険。二重は、エンジン側で無視する)
+            android.view.KeyEvent.KEYCODE_HEADSETHOOK, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                if (PochiEngine.state.value.currentKey != null && PochiEngine.mediaBtnOn) {
+                    if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) PochiEngine.mediaKeyDown()
+                    else if (event.action == android.view.KeyEvent.ACTION_UP) PochiEngine.mediaKeyUp()
+                    return true
+                }
+            }
+        }
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
         if (!imm.isAcceptingText) {
             val handled = if (event.action == android.view.KeyEvent.ACTION_DOWN) hardKeyDown(event.keyCode, event) else if (event.action == android.view.KeyEvent.ACTION_UP) hardKeyUp(event.keyCode) else false

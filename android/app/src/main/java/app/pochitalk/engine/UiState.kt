@@ -95,6 +95,8 @@ data class UiState(
     val notifyRoom: Boolean = false,
     /** FAX の送り方: true=完全アナログ(音だけ) / false=アナログライクデジタル(音+データ便) */
     val faxAnalog: Boolean = false,
+    /** メディアボタン (イヤホンのボタンなど) で、話す・止めるを切り替える (初期オン)。 */
+    val mediaBtn: Boolean = true,
     /** 通信の記録を端末に残す (初期オフ)。オンの間は名前の前に 💾 が付く。 */
     val logMode: Boolean = false,
     /** 利用上の注意に同意済みか (同意した版が、いまの版と同じ)。 */

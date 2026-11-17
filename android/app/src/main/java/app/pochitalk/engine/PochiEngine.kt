@@ -3,6 +3,7 @@ package app.pochitalk.engine
 import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -80,6 +81,7 @@ object PochiEngine {
     private const val PREF_AUTO_RECONNECT = "pochitalk_auto_reconnect" // 自動で再接続する: オンにしたときだけ "1" を保存 (標準はオフ)
     private const val PREF_NOTIFY_ROOM = "pochitalk_notify_room"
     private const val PREF_FAX_ANALOG = "pochitalk_fax_analog"
+    private const val PREF_MEDIA_BTN = "pochitalk_media_btn"
     private const val PREF_LOG_MODE = "pochitalk_log_mode"
     private const val PREF_CONSENT = "pochitalk_consent"
     /** 利用上の注意の版。内容を変えたら日付を変えると、もう一度同意を求める。 */
@@ -232,7 +234,7 @@ object PochiEngine {
         val savedGain = prefs.getInt(PREF_MIC_GAIN, 0).coerceIn(0, 30)
         micGain.gain = Math.pow(10.0, savedGain / 20.0).toFloat()
         _state.update { it.copy(micGainDb = savedGain, welcomeOn = prefs.getString(PREF_WELCOME, null) != "off", autoReconnect = prefs.getString(PREF_AUTO_RECONNECT, null) == "1") }
-        _state.update { it.copy(notifyRoom = prefs.getString(PREF_NOTIFY_ROOM, null) == "1", faxAnalog = prefs.getString(PREF_FAX_ANALOG, null) == "1", consentOk = prefs.getString(PREF_CONSENT, null) == CONSENT_VERSION) }
+        _state.update { it.copy(notifyRoom = prefs.getString(PREF_NOTIFY_ROOM, null) == "1", faxAnalog = prefs.getString(PREF_FAX_ANALOG, null) == "1", mediaBtn = prefs.getString(PREF_MEDIA_BTN, null) != "0", consentOk = prefs.getString(PREF_CONSENT, null) == CONSENT_VERSION) }
         if (prefs.getString(PREF_LOG_MODE, null) == "1") { _state.update { it.copy(logMode = true) }; startLogFile() }
         val savedSfx = prefs.getInt(PREF_SFX_VOL, 100).coerceIn(0, 150)
         sounds.volume = savedSfx / 100f
@@ -252,6 +254,7 @@ object PochiEngine {
             PeerConnectionFactory.InitializationOptions.builder(app).createInitializationOptions(),
         )
         val module = JavaAudioDeviceModule.builder(app)
+            .setAudioSource(android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION) // 通話用のマイク (ヘッドセットのマイクに切り替わる)
             .setSamplesReadyCallback { samples -> onMicSamples(samples) }
             .setAudioRecordStateCallback(object : JavaAudioDeviceModule.AudioRecordStateCallback {
                 override fun onWebRtcAudioRecordStart() { Runtime.scope.launch { onRtcRecording(true) } }
@@ -686,6 +689,8 @@ object PochiEngine {
         if (currentKey != null && roomOpenAt > 0) {
             savedOpenKey = currentKey; savedOpenAt = roomOpenAt; savedOpenTime = System.currentTimeMillis(); savedMeta = roomMeta
         }
+        rxStopJobs.values.forEach { it.cancel() }
+        rxStopJobs.clear()
         room?.leave()
         room = null
         rx.clear()
@@ -982,15 +987,57 @@ object PochiEngine {
         room?.addLocalTrack(track, STREAM_ID)
     }
 
+    private var audioDeviceCallback: android.media.AudioDeviceCallback? = null
+
+    /** 有線のヘッドセット (4極) / USB ヘッドセットがつながっているか。 */
+    private fun isWiredType(t: Int) = t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+        t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == android.media.AudioDeviceInfo.TYPE_USB_HEADSET
+
+    /**
+     * 音の経路を決める。有線ヘッドセットがあればそこへ (出力も、ヘッドセットのマイクでの入力も)、なければ本体のスピーカー。
+     * Android 12+ は setCommunicationDevice、11以下は通話モード + setSpeakerphoneOn で切り替える。
+     */
+    private fun applyAudioRoute() {
+        val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
+        if (Build.VERSION.SDK_INT >= 31) {
+            val devs = am.availableCommunicationDevices
+            val wired = devs.firstOrNull { isWiredType(it.type) }
+            if (wired != null) {
+                am.setCommunicationDevice(wired)
+                Runtime.log("audio route: wired headset (type=${wired.type})")
+            } else {
+                val spk = devs.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (spk != null) am.setCommunicationDevice(spk) else am.clearCommunicationDevice()
+                Runtime.log("audio route: speaker")
+            }
+        } else {
+            val wired = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { isWiredType(it.type) }
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = !wired // 有線ヘッドセットがあるときは、スピーカーを切る (OS が、ヘッドセットへ出す)
+            Runtime.log("audio route: ${if (wired) "wired headset" else "speaker"}")
+        }
+    }
+
     private fun enterAudioSession() {
         val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
-        @Suppress("DEPRECATION")
-        am.isSpeakerphoneOn = true
+        applyAudioRoute()
+        if (audioDeviceCallback == null) {
+            val cb = object : android.media.AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>) { if (currentKey != null) applyAudioRoute() }
+                override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>) { if (currentKey != null) applyAudioRoute() }
+            }
+            audioDeviceCallback = cb
+            am.registerAudioDeviceCallback(cb, android.os.Handler(android.os.Looper.getMainLooper()))
+        }
     }
 
     private fun exitAudioSession() {
         val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioDeviceCallback?.let { am.unregisterAudioDeviceCallback(it) }
+        audioDeviceCallback = null
+        if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice()
         @Suppress("DEPRECATION")
         am.isSpeakerphoneOn = false
         am.mode = AudioManager.MODE_NORMAL
@@ -1081,6 +1128,60 @@ object PochiEngine {
 
     // ================================================================ 話す (PTT)
 
+    // ---------------------------------------------------------------- メディアボタン (イヤホン・スピーカーマイクのボタン)
+
+    private var mediaLastDown = 0L
+    private var mediaDownAt = 0L
+    private var mediaToggled = false
+
+    val mediaBtnOn: Boolean get() = _state.value.mediaBtn
+
+    fun setMediaBtn(on: Boolean) {
+        _state.update { it.copy(mediaBtn = on) }
+        if (on) prefs.edit().remove(PREF_MEDIA_BTN).apply() else prefs.edit().putString(PREF_MEDIA_BTN, "0").apply()
+    }
+
+    /** メディアボタンを押した: 押すたびに、話し始める / 止める。400ms 以内の二重 (複数の経路から届いた同じ押下) は無視する。 */
+    fun mediaKeyDown() {
+        Runtime.scope.launch {
+            if (!_state.value.mediaBtn || room == null) return@launch
+            val now = System.currentTimeMillis()
+            if (now - mediaLastDown < 400) return@launch
+            mediaLastDown = now
+            if (isTransmitting) {
+                if (mediaToggled) { // 切り替えで話していたら、止める
+                    mediaToggled = false
+                    mediaDownAt = 0L
+                    pressed = false
+                    stopTransmission()
+                }
+                return@launch
+            }
+            mediaToggled = true
+            mediaDownAt = now
+            pressed = true
+            startTransmission(quiet = false)
+            if (!isTransmitting) { // 話中などで始められなかったら、押した扱いを戻す
+                pressed = false
+                mediaToggled = false
+                mediaDownAt = 0L
+            }
+        }
+    }
+
+    /** メディアボタンを離した (届く端末だけ): 500ms 以上の長押しなら、離したら止める。短い押しは、話し続ける。 */
+    fun mediaKeyUp() {
+        Runtime.scope.launch {
+            val at = mediaDownAt
+            mediaDownAt = 0L
+            if (at > 0 && mediaToggled && isTransmitting && System.currentTimeMillis() - at >= 500) {
+                mediaToggled = false
+                pressed = false
+                stopTransmission()
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- 外付けキーボード
 
     private var spaceHeld = false
@@ -1088,6 +1189,7 @@ object PochiEngine {
     /** スペースキーを押した: 話す。モールス送信中は、何もしない (Web版と同じく、押している間だけ話す)。 */
     fun hardSpaceDown() {
         Runtime.scope.launch {
+            mediaToggled = false
             if (spaceHeld || room == null || morseJob != null || _state.value.faxMode) return@launch
             spaceHeld = true
             pressed = true
@@ -1107,6 +1209,7 @@ object PochiEngine {
 
     fun pttPress() {
         Runtime.scope.launch {
+            mediaToggled = false
             pressed = true
             startTransmission(quiet = false)
         }
@@ -1401,6 +1504,7 @@ object PochiEngine {
         val peer = peers[peerId]
         Runtime.log("pttState from ${peerId.take(5)} talking=$talking")
         if (peer != null) peer.talking = talking
+        rxStopJobs.remove(peerId)?.cancel() // 終わりの合図の待ち時間中に、また合図が来たら、待ちを取り消す
         if (talking) {
             rx.onTalkStart(peerId)
             currentTalkerId = peerId
@@ -1416,9 +1520,38 @@ object PochiEngine {
                 onStartReceiving(peer?.name ?: "相手")
             }
         } else if (currentTalkerId == peerId) {
-            onStopReceiving()
+            // 終わりの合図は、音声より先に届く。相手の音が静かになるまで待ってから、RX表示を消して終了音を鳴らす
+            rxStopWait(peerId)
         }
         renderPeers()
+    }
+
+    private val rxStopJobs = HashMap<String, Job>()
+
+    /** 約120ms連続で無音になるまで待つ (最長1.5秒)。話中ロック(talking)は、待たずに解除済み。 */
+    private fun rxStopWait(peerId: String) {
+        val t0 = System.currentTimeMillis()
+        rxStopJobs[peerId] = Runtime.scope.launch {
+            var quietSince = 0L
+            while (true) {
+                delay(40)
+                val p = peers[peerId]
+                if (p == null || p.talking) { rxStopJobs.remove(peerId); return@launch } // 去った・また話し始めた
+                val r = room
+                val level = if (r == null) null else kotlinx.coroutines.withTimeoutOrNull(300) {
+                    kotlinx.coroutines.suspendCancellableCoroutine<Double?> { c ->
+                        r.fetchInboundAudioLevel(peerId) { if (c.isActive) c.resumeWith(Result.success(it)) }
+                    }
+                }
+                val now = System.currentTimeMillis()
+                val quiet = level == null || level < 0.004
+                if (quiet) { if (quietSince == 0L) quietSince = now } else quietSince = 0L
+                if ((quietSince != 0L && now - quietSince >= 120) || now - t0 > 1500) break
+            }
+            rxStopJobs.remove(peerId)
+            if (currentTalkerId == peerId && peers[peerId]?.talking != true) onStopReceiving()
+            renderPeers()
+        }
     }
 
     private fun onStartReceiving(name: String) {

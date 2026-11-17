@@ -125,6 +125,8 @@ fun SettingsDialog(state: UiState, actions: Actions, onShowAbout: () -> Unit, on
                 Text("スライダーを離すと、試しに「ガッ」と鳴ります。効果音を消したいときは、音量を 0% にしてください。", color = PochiColors.Muted, fontSize = 12.sp)
 
                 SwitchRow("新しい部屋ができたら、音で知らせる", state.notifyRoom) { PochiEngine.setNotifyRoom(it) }
+                SwitchRow("メディアボタン（イヤホンのボタンなど）で、話す・止めるを切り替える", state.mediaBtn) { PochiEngine.setMediaBtn(it) }
+                Text("メディアボタンは、押した・離したが分からない端末があるので、押すたびに「話す」「止める」を切り替えます。長く押すと、押している間だけ話せる端末もあります。スペースキーは、押している間だけ話します。部屋にいる間は、ほかの音楽アプリの再生/停止ボタンを、このアプリが受け取ります。", color = PochiColors.Muted, fontSize = 11.sp)
                 Text("音だけです（画面の知らせや、通知は出しません）。効果音の音量が 0% のときは鳴りません。", color = PochiColors.Muted, fontSize = 12.sp)
 
                 SectionTitle("通信の記録")
