@@ -198,9 +198,10 @@ private fun RoomRow(room: RoomInfo, onJoin: (String) -> Unit) {
     val border = when {
         room.air -> PochiColors.Tx
         room.isCurrent -> PochiColors.Accent
+        room.bad -> Color(0xFF9A3412)
         else -> PochiColors.ChipBorder
     }
-    val bg = if (room.isCurrent) Color(0xFF172554) else PochiColors.Chip
+    val bg = if (room.isCurrent) Color(0xFF172554) else if (room.bad) Color(0xFF3B2418) else PochiColors.Chip
     Column(
         Modifier
             .fillMaxWidth()
@@ -226,7 +227,7 @@ private fun RoomRow(room: RoomInfo, onJoin: (String) -> Unit) {
             room.count == 0 && room.names.isEmpty() -> "この部屋には、いま誰もいません（タップで入る）"
             else -> room.names.joinToString("、")
         }
-        Text(who, color = PochiColors.Muted, fontSize = 12.sp)
+        Text(who, color = if (room.bad) Color(0xFFD6A28A) else PochiColors.Muted, fontSize = 12.sp)
     }
 }
 

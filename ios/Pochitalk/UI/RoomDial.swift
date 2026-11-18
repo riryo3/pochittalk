@@ -58,8 +58,8 @@ private struct DialRow: View {
 
     var body: some View {
         let full = room.count >= PochiEngine.maxRoom && !room.isCurrent
-        let edge: Color = room.air ? PC.tx : pending ? PC.amber : isBotRoom(room.key) ? PC.botGreen : .clear
-        let bg: Color = room.isCurrent ? Color(hex: 0x172554, alpha: 0.55) : onLine ? Color(hex: 0x3B82F6, alpha: 0.10) : .clear
+        let edge: Color = room.guardHit ? GuardColor.edge : room.air ? PC.tx : pending ? PC.amber : isBotRoom(room.key) ? PC.botGreen : .clear
+        let bg: Color = room.guardHit ? GuardColor.bg : room.isCurrent ? Color(hex: 0x172554, alpha: 0.55) : onLine ? Color(hex: 0x3B82F6, alpha: 0.10) : .clear
         let head = (isBotRoom(room.key) ? "🦜 " : "") + (room.air ? "🔴 " : "🔵 ") + formatKey(room.key) + " · 👤\(room.count)"
             + (room.isCurrent && room.count != connected ? "（つながっているのは \(connected) 人）" : "")
             + (room.count >= PochiEngine.maxRoom ? " · 満員" : "") + (pending ? " · 招待" : "")
@@ -75,7 +75,7 @@ private struct DialRow: View {
                 if !room.tag.isEmpty {
                     Text("🏷 " + room.tag + (room.tagBy.isEmpty ? "" : "（\(room.tagBy)）")).font(.system(size: 12)).foregroundStyle(Color(hex: 0x93C5FD)).lineLimit(1)
                 }
-                Text(who).font(.system(size: 12)).foregroundStyle(PC.muted).fixedSize(horizontal: false, vertical: true) // 全員の名前を省略せず、折り返して出す
+                Text(who).font(.system(size: 12)).foregroundStyle(room.guardHit ? GuardColor.fg : PC.muted).fixedSize(horizontal: false, vertical: true) // 全員の名前を省略せず、折り返して出す
                 Spacer(minLength: 0)
             }
             .padding(.leading, 13).padding(.trailing, 16).padding(.top, 20)

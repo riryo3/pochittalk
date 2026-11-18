@@ -210,6 +210,9 @@ const HTML = `<!DOCTYPE html>
     .about-head { flex: none; display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-bottom: 1px solid #374151; background: var(--card-bg); }
     .about-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 18px 20px; }
     .about a { color: #93c5fd; text-decoration: underline; }
+    #settingsDialog .set-card { background: rgba(30, 41, 59, 0.55); border: 1px solid #374151; border-radius: 12px; padding: 4px 14px 12px; margin: 0 0 14px; }
+    #settingsDialog .set-hr { border: 0; border-top: 1px solid #374151; margin: 12px 0 4px; }
+    #settingsDialog .set-card h3 { margin: 10px 0 8px; }
     .about h3 { margin: 16px 0 6px; color: #93c5fd; font-size: 1rem; border-bottom: 1px solid #374151; padding-bottom: 4px; }
     .about h4 { margin: 12px 0 4px; color: #fbbf24; font-size: 0.88rem; }
     .about ul { padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
@@ -293,6 +296,17 @@ const HTML = `<!DOCTYPE html>
     .rdial-item.invited { border-left-color: #fbbf24; }
     .rdial-item.air { border-left-color: var(--tx-color); }
     .rdial-item.full { filter: grayscale(0.7); }
+    .rdial-item.ng { background: rgba(120, 53, 15, 0.22); border-left-color: #9a3412; }
+    .rdial-item.ng > div:first-child { color: #d6a28a; }
+    .chip-name.ng, .peer-tag.ng { color: #d6a28a; background: #3b2418; }
+    .peer-tag.ng.muted-by-guard::after { content: ' 🔕'; }
+    .peer-tag.clickable { cursor: pointer; }
+    .guard-bubbles { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+    .guard-bubble { border: 1px solid #9a3412; background: #3b2418; color: #fdba74; border-radius: 999px; padding: 3px 12px; font-size: 0.82rem; cursor: pointer; font-family: inherit; }
+    .guard-bubbles .gb-empty { opacity: .7; font-size: 0.8rem; }
+    .guard-list { margin: 6px 0 10px; font-size: 0.8rem; }
+    .guard-list .gl-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(148,163,184,0.15); }
+    .guard-list .gl-row span { flex: 1; word-break: break-all; }
     .rdial-empty { height: var(--rdial-row); display: flex; align-items: center; justify-content: center; color: var(--muted-color); font-size: 0.82rem; text-align: center; padding: 0 16px; scroll-snap-align: center; }
     .rdial-line { position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; transform: translateY(-1px); background: #ef4444; box-shadow: 0 0 8px #ef4444; pointer-events: none; border-radius: 1px; z-index: 2; } /* 赤い線は、部屋の文字（絵文字の 💾 を含む）より手前に出す */
     .rdial-line::before, .rdial-line::after { content: ''; position: absolute; top: -4px; border: 5px solid transparent; }
@@ -711,11 +725,14 @@ const HTML = `<!DOCTYPE html>
         <button class="btn-sub" id="settingsClose" type="button" style="padding:4px 12px">閉じる</button>
       </div>
       <div class="about-body">
+        <section class="set-card">
         <h3>マイク</h3>
         <p>「マイクテスト開始」を押して声を出し、メーターが振れることを確認してください。小さく聞こえる場合は、入力レベルを上げます（上げすぎると音が割れます）。</p>
         <label class="vox-sens" style="margin:10px 0"><span>入力レベル</span><input type="range" id="homeGain" min="0" max="30" step="1" value="0"><span class="gain-val" id="homeGainVal">そのまま</span></label>
         <div class="level-row"><span class="level-label">MIC</span><canvas class="level" id="homeLevelCanvas" width="280" height="14"></canvas><span class="level-db" id="homeLevelDb">-∞ dB</span></div>
         <button class="btn-sub" id="micTestBtn" type="button" style="width:100%;margin-top:10px">マイクテスト開始</button>
+        </section>
+        <section class="set-card">
         <h3>操作</h3>
         <p style="margin:8px 0 6px">話すボタンの位置</p>
         <div class="seg" id="pttPosSeg">
@@ -734,12 +751,43 @@ const HTML = `<!DOCTYPE html>
         <p style="opacity:.8;font-size:0.75rem;margin:6px 0 10px">「自動」は、縦に長い端末（Xperia など）のときだけ、ダイヤルを画面の下に置きます。それ以外は、左の端から出します。</p>
         <label class="sound-toggle"><input type="checkbox" id="mediaBtnCheck" checked> メディアボタン（イヤホンのボタンなど）で、話す・止めるを切り替える</label>
         <p style="opacity:.8;font-size:0.75rem;margin:4px 0 10px">メディアボタンは、押した・離したが分からないので、押すたびに「話す」「止める」を切り替えます。スペースキーは、押している間だけ話します。部屋にいる間は、無音を鳴らし続けます。</p>
+        </section>
+        <section class="set-card">
+        <h3>自衛リスト</h3>
+        <p style="font-size:0.8rem;opacity:.85;margin-bottom:6px">この端末の中だけで働きます。相手には伝わりません。部屋にいる相手のハンドルネームを押すと、その相手（端末）を登録できます。登録した相手が部屋に入ってくると、音で知らせて、その相手の声を自動で消音します。</p>
+        <p style="margin:8px 0 4px;font-size:0.8rem">嫌な言葉（名前と話題タグに含まれていたら、色を変えます）</p>
+        <div style="display:flex;gap:6px"><input type="text" id="guardWordInput" maxlength="20" autocomplete="off" placeholder="言葉を入れて「追加」" style="flex:1;min-width:0;background:#0f172a;color:inherit;border:1px solid #334155;border-radius:6px;padding:6px"><button class="btn-sub" id="guardWordAdd" type="button" style="padding:4px 14px">追加</button></div>
+        <div class="guard-bubbles" id="guardBubbles"></div>
+        <hr class="set-hr">
+        <p style="margin:10px 0 4px;font-size:0.8rem">ミュートする相手（登録した相手）</p>
+        <div class="guard-list" id="guardList"></div>
+        <p style="margin:8px 0 4px;font-size:0.78rem;opacity:.85">端末の目印（ID）が分かっている相手を、直接足せます（16 文字の英数字）。</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><input type="text" id="guardIdInput" maxlength="16" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="目印（ID）" style="flex:2 1 150px;min-width:0;background:#0f172a;color:inherit;border:1px solid #334155;border-radius:6px;padding:6px;font-family:monospace"><input type="text" id="guardIdName" maxlength="12" autocomplete="off" placeholder="名前（メモ）" style="flex:1 1 90px;min-width:0;background:#0f172a;color:inherit;border:1px solid #334155;border-radius:6px;padding:6px"><button class="btn-sub" id="guardIdAdd" type="button" style="padding:4px 14px">追加</button></div>
+        <hr class="set-hr">
+        <p style="margin:10px 0 6px;font-size:0.8rem">一致した部屋の扱い</p>
+        <div class="seg" id="guardModeSeg">
+          <button type="button" class="seg-btn on" data-mode="warn">色を変える</button>
+          <button type="button" class="seg-btn" data-mode="hide">一覧から隠す</button>
+        </div>
+        </section>
+        <section class="set-card">
         <h3>通話テスト</h3>
         <p style="font-size:0.8rem;opacity:.85;margin-bottom:6px">おうむ返しボットが動いているときだけ使えます。話すと、あなたの声が返ってきます。</p>
         <button class="btn-sub" id="testRoomBtn" type="button" style="width:100%">おうむ返しの部屋に入る</button>
+        </section>
+        <section class="set-card">
         <h3>効果音</h3>
         <label class="vox-sens" style="margin:10px 0"><span>音量</span><input type="range" id="sfxVol" min="0" max="150" step="5" value="100"><span class="gain-val" id="sfxVolVal">100%</span></label>
+        <p style="margin:12px 0 6px">相手の声の音量（ブースト）</p>
+        <div class="seg" id="rxBoostSeg">
+          <button type="button" class="seg-btn on" data-boost="1">そのまま</button>
+          <button type="button" class="seg-btn" data-boost="2">2倍</button>
+          <button type="button" class="seg-btn" data-boost="4">4倍</button>
+        </div>
+        <p style="opacity:.8;font-size:0.75rem;margin:6px 0 10px">端末の音量を最大にしても小さいときに使います。上げすぎると、音が割れたり、スピーカーマイクでハウリングしたりします。割れを抑える処理は入れています。</p>
         <p style="opacity:.8;font-size:0.75rem">スライダーを離すと、試しに「ガッ」と鳴ります。効果音を消したいときは、音量を 0% にしてください。</p>
+        </section>
+        <section class="set-card">
         <h3>通信の診断</h3>
         <p style="font-size:0.8rem;opacity:.85;margin-bottom:6px">うまくつながらないときに使います。ボタンを押すと、設定が閉じて、メイン画面の下に診断が出ます。部屋に入ったまま、相手ごとの接続の状態を見られます。画面を撮って送ると、原因を調べやすくなります。</p>
         <button class="btn-sub" id="diagBtn" type="button" style="width:100%">診断を、メイン画面に表示する</button>
@@ -749,20 +797,51 @@ const HTML = `<!DOCTYPE html>
         <label class="sound-toggle" style="margin-top:8px"><input type="checkbox" id="autoReconnect"> 自動で再接続する（標準はオフ。画面に戻ったときや、回線が戻ったときなど）</label>
         <label class="sound-toggle" style="margin-top:8px"><input type="checkbox" id="relayOnly"> 通信を、中継（TURN）経由のみにする（標準はオン。直接つなぎたいときだけ、オフ）</label>
         <p style="opacity:.8;font-size:0.75rem">切り替えると、ページを読み込み直します。部屋のみんなが同じ設定である必要はありません。</p>
+        </section>
+        <section class="set-card">
         <h3>初回案内</h3>
         <label class="sound-toggle"><input type="checkbox" id="welcomeAgain2"> 開いたときに初回案内を表示する</label>
+        </section>
+        <section class="set-card">
         <h3>ソース・ライセンス</h3>
         <p>このアプリは、qramo さんの「ぽっと通話」をもとに、ボタンを押している間だけ話せるようにしたものです。</p>
         <p><a href="https://potalk.app/" target="_blank" rel="noopener noreferrer">potalk.app</a><br><a href="https://github.com/qramo/po_call" target="_blank" rel="noopener noreferrer">github.com/qramo/po_call</a></p>
         <p>このアプリのソースコードは GitHub で公開しています。<br><a href="https://github.com/riryo3/pochittalk" target="_blank" rel="noopener noreferrer">github.com/riryo3/pochittalk</a></p>
         <p>MIT License<br>Copyright (c) 2026 qramo<br>Copyright (c) 2026 リョータ</p>
         <p style="opacity:.8;font-size:0.75rem">使用ライブラリ: <a href="https://github.com/dmotz/trystero" target="_blank" rel="noopener noreferrer">Trystero</a>（MIT License）</p>
+        </section>
+        <section class="set-card">
         <h3>このアプリについて</h3>
         <button class="btn-sub" id="aboutBtn" type="button" style="width:100%">使い方・プライバシーを見る</button>
+        </section>
+        <section class="set-card">
         <h3>うまくつながらないとき</h3>
         <p style="opacity:.8;font-size:0.78rem;margin:6px 0">このサイトの保存データ（ハンドルネームや設定）を消して、読み込み直します。ブラウザの履歴は消えません。</p>
         <button class="btn-sub" id="resetDataBtn" type="button" style="width:100%">保存データを消して、読み込み直す</button>
         <p style="opacity:.55;font-size:0.7rem;margin-top:10px">版: __VERSION__</p>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="guardMenuDialog">
+    <div class="about" style="max-width:420px">
+      <div class="about-head"><strong id="gmTitle">相手の操作</strong><button class="btn-sub" id="gmClose" type="button" style="padding:4px 12px">閉じる</button></div>
+      <div class="about-body">
+        <div id="gmMain">
+          <button class="btn-sub" id="gmMute" type="button" style="width:100%;margin-top:10px"></button>
+          <p style="font-size:0.75rem;opacity:.8;margin:4px 0 12px">この端末だけの設定です。相手には伝わりません。声は消音され、一覧で色が変わります。</p>
+          <button class="btn-sub" id="gmReport" type="button" style="width:100%">この相手を通報する</button>
+        </div>
+        <div id="gmReportBox" style="display:none">
+          <p style="margin:8px 0 6px;font-size:0.85rem">通報フォーム（Google フォーム）を、新しいタブで開きます。次の内容が、フォームに入った状態で開きます。</p>
+          <div class="guard-list" id="gmReportInfo" style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:8px 10px"></div>
+          <p style="font-size:0.75rem;opacity:.8;margin:4px 0 10px">あなたの名前や端末の情報は、含まれません。理由などは、フォームで選んでください。</p>
+          <label class="sound-toggle" id="gmMuteRow"><input type="checkbox" id="gmMuteAlso" checked> この相手を、ミュートにも登録する</label>
+          <label class="sound-toggle" style="margin:4px 0 10px"><input type="checkbox" id="gmWordAlso"> この名前を、嫌な言葉にも登録する</label>
+          <button class="btn-sub" id="gmReportGo" type="button" style="width:100%;background:#2563eb">フォームを開く</button>
+          <button class="btn-sub" id="gmReportBack" type="button" style="width:100%;margin-top:8px">もどる</button>
+        </div>
       </div>
     </div>
   </dialog>
@@ -780,7 +859,7 @@ const HTML = `<!DOCTYPE html>
         <h3>2. このアプリについて読む</h3>
         <p>使い方と、プライバシー（見える情報、保存されるもの）を説明しています。</p>
         <button class="btn-sub" id="welcomeAboutBtn" type="button" style="width:100%;margin-top:6px">このアプリについて</button>
-        <label class="sound-toggle" style="margin-top:16px;align-items:flex-start;gap:8px"><input type="checkbox" id="termsAgree" style="margin-top:4px"> <span>「このアプリについて」を読み、次のことを了解しました。個人が作ったα版で、動作や安全性の保証はありません。部屋は公開で、知らない人にも声が聞こえます。人数が多いと、つながりにくくなることがあります。<b>自己責任で使います。</b></span></label>
+        <label class="sound-toggle" style="margin-top:16px;align-items:flex-start;gap:8px"><input type="checkbox" id="termsAgree" style="margin-top:4px"> <span>「このアプリについて」を読み、次のことを了解しました。個人が作ったα版で、動作や安全性の保証はありません。部屋は公開で、知らない人にも声が聞こえます。人数が多いと、つながりにくくなることがあります。嫌がらせ・わいせつ・差別・脅迫・違法な内容など、他の人を傷つける使い方はしません。困った相手は、部屋の中で名前をタップして、ミュートや通報ができます。<b>自己責任で使います。</b></span></label>
         <label class="sound-toggle" style="margin-top:12px"><input type="checkbox" id="welcomeAgain" checked> 次回も表示する</label>
         <button class="btn-sub" id="welcomeClose" type="button" disabled style="width:100%;margin-top:12px;background:#2563eb;opacity:.45">はじめる</button>
       </div>
@@ -999,7 +1078,7 @@ const HTML = `<!DOCTYPE html>
     let micSendGain = null, morseOsc = null, morseGain = null; // モールス送信用
     let faxOsc = null, faxGain = null, faxSideGain = null; // FAX送信用
     let audioCtx = null, userMediaStream = null, localAudioTrack = null, noMic = false; // noMic: マイクの機器がない端末（モールス・FAXの音だけ送れる）
-    let room = null, sendPttState = null, sendNickname = null, sendFaxPage = null;
+    let room = null, sendPttState = null, sendNickname = null, sendFaxPage = null, sendGuardId = null;
     let isTransmitting = false, currentTalkerId = null;
     const peerMap = new Map();
 
@@ -1087,6 +1166,58 @@ const HTML = `<!DOCTYPE html>
     nameInput.value = myNickname;
     // 通信の記録を残している人は、ハンドルネームの前に 💾 を付けて、同じ部屋の人にも分かるようにする
     function shownName() { return (window.pcLogMode ? '💾' : '') + myNickname; }
+
+    // ---------- 自衛リスト（この端末の中だけ。相手には伝わらない）----------
+    function randHex(n) { let r = ''; const a = new Uint8Array(n / 2); try { crypto.getRandomValues(a); } catch (_) { for (let i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 256); } a.forEach(function (b) { r += (b < 16 ? '0' : '') + b.toString(16); }); return r; }
+    let myUid = '';
+    try { myUid = localStorage.getItem('pochitalk_uid') || ''; } catch (_) {}
+    if (!/^[0-9a-f]{16}$/.test(myUid)) { myUid = randHex(16); try { localStorage.setItem('pochitalk_uid', myUid); } catch (_) {} }
+    const guard = { words: [], ids: {}, mode: 'warn' };
+    try {
+      const g0 = JSON.parse(localStorage.getItem('pochitalk_guard') || '{}');
+      if (Array.isArray(g0.words)) guard.words = g0.words.map(String).slice(0, 50);
+      if (g0.ids && typeof g0.ids === 'object') Object.keys(g0.ids).slice(0, 200).forEach(function (k) { if (/^[0-9a-f]{16}$/.test(k)) guard.ids[k] = String(g0.ids[k]).slice(0, 12); });
+      if (g0.mode === 'hide') guard.mode = 'hide';
+    } catch (_) {}
+    function guardSave() { try { localStorage.setItem('pochitalk_guard', JSON.stringify(guard)); } catch (_) {} }
+    function guardNorm(t) { return String(t || '').normalize('NFKC').toLowerCase().replace(/[\u30a1-\u30f6]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x60); }); } // 全角・半角、大文字・小文字、カタカナ・ひらがなの違いを、同じにみなす
+    function guardWordHit(text) { if (!guard.words.length || !text) return false; const t = guardNorm(text); return guard.words.some(function (w) { const n = guardNorm(w).trim(); return n && t.indexOf(n) >= 0; }); }
+    function guardIdHit(uid) { return !!(uid && guard.ids[uid]); }
+    function guardNameBad(name, uid) { const n = String(name || ''); if (n.indexOf('(自分)') >= 0) return false; return guardWordHit(n) || guardIdHit(uid); }
+    function guardPeerCheck(peerId) { // 相手が、登録済みなら、声を止めて、音で知らせる。言葉に当たるだけなら、色を変えるだけ
+      const p = peerMap.get(peerId); if (!p) return;
+      if (guardIdHit(p.uid) && !p.guardMute) {
+        p.guardMute = true;
+        applyPeerAudio(peerId);
+        try { playBusyTone(); } catch (_) {}
+        toast('⚠ 自衛リストの相手が入ってきました：' + (p.name || guard.ids[p.uid]) + '（声は消音しています）');
+      }
+    }
+    function guardRecheckAll() { peerMap.forEach(function (p, id) { if (guardIdHit(p.uid) && !p.guardMute) guardPeerCheck(id); else if (!guardIdHit(p.uid) && p.guardMute) { p.guardMute = false; applyPeerAudio(id); } }); }
+    function guardAfterChange() { guardSave(); guardRecheckAll(); try { renderPeers(); renderScan(); } catch (_) {} guardRenderList(); }
+    function guardRenderList() {
+      const bb = document.getElementById('guardBubbles');
+      if (bb) {
+        bb.textContent = '';
+        if (!guard.words.length) { const e = document.createElement('span'); e.className = 'gb-empty'; e.textContent = '（まだ登録はありません）'; bb.appendChild(e); }
+        guard.words.forEach(function (w) {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'guard-bubble'; b.textContent = w;
+          b.addEventListener('click', function () { if (window.confirm('「' + w + '」を、嫌な言葉から外しますか？')) { guard.words = guard.words.filter(function (x) { return x !== w; }); guardAfterChange(); } });
+          bb.appendChild(b);
+        });
+      }
+      const box = document.getElementById('guardList'); if (!box) return;
+      box.textContent = '';
+      const ids = Object.keys(guard.ids);
+      if (!ids.length) { const e = document.createElement('div'); e.style.opacity = '.7'; e.textContent = '（まだ登録はありません）'; box.appendChild(e); return; }
+      ids.forEach(function (id) {
+        const r = document.createElement('div'); r.className = 'gl-row';
+        const sp = document.createElement('span'); sp.textContent = guard.ids[id] + '（' + id + '）'; r.appendChild(sp);
+        const bt = document.createElement('button'); bt.type = 'button'; bt.className = 'btn-sub'; bt.style.padding = '2px 10px'; bt.textContent = '解除';
+        bt.addEventListener('click', function () { delete guard.ids[id]; guardAfterChange(); });
+        r.appendChild(bt); box.appendChild(r);
+      });
+    }
 
     // 効果音の音量（0〜150%）。効果音はすべてこのゲインを通す。マイク（送信）には影響しない
     let sfxVol = 1, sfxGainNode = null, speakerMuted = false;
@@ -1377,6 +1508,20 @@ const HTML = `<!DOCTYPE html>
     // 相手の音声を、再生要素と解析（レベル計・モールス・FAX）に載せる。onPeerStream と、接続の track イベント（pochiTrack）の両方から呼ぶ。
     // Trystero は同じ相手から「古いストリーム」を知らせてくることがあるので、終わったトラックしか無い物は捨て、鳴っている物を黙った物で置き換えない
     const rxSources = new Map(); // peerId -> [MediaStreamAudioSourceNode] 解析に使っている入力（載せ替えるときに外す）
+    // 相手の声のブースト（端末の最大音量より大きくしたいとき）。1 倍のときは、今までどおり <audio> から鳴らす。2 倍以上のときは、<audio> は無音にして、ゲイン→リミッターを通して鳴らす
+    let rxBoost = 1;
+    try { const bv = parseFloat(localStorage.getItem('pochitalk_rx_boost')); if (bv === 2 || bv === 4) rxBoost = bv; } catch (_) {}
+    const rxBoostNodes = new Map(); // peerId -> GainNode
+    function applyPeerAudio(peerId) {
+      const el = document.getElementById('audio-' + peerId); if (!el) return;
+      const p = peerMap.get(peerId);
+      const off = speakerMuted || !!(p && p.guardMute);
+      const g = rxBoostNodes.get(peerId);
+      if (rxBoost > 1 && g) { el.muted = true; g.gain.value = off ? 0 : rxBoost; }
+      else { el.muted = off; if (g) g.gain.value = 0; }
+    }
+    window.__pochiBoost = function () { return { boost: rxBoost, gains: Array.from(rxBoostNodes.values()).map(function (g) { return g.gain.value; }), muted: Array.from(document.querySelectorAll('audio[id^="audio-"]')).map(function (x) { return x.muted; }) }; }; // 試験用
+    function applyAllPeerAudio() { document.querySelectorAll('audio[id^="audio-"]').forEach(function (a) { applyPeerAudio(a.id.slice(6)); }); }
     function attachRemoteAudio(peerId, stream, fromTrack) {
       if (!room || !peerMap.has(peerId) || !stream) return;
       const tracks = stream.getAudioTracks().filter(function (t) { return t.readyState === 'live'; });
@@ -1392,7 +1537,7 @@ const HTML = `<!DOCTYPE html>
         el.id = 'audio-' + peerId;
         el.autoplay = true;
         el.playsInline = true;
-        el.muted = speakerMuted;
+        el.muted = speakerMuted || !!(peerMap.get(peerId) && peerMap.get(peerId).guardMute);
         document.body.appendChild(el);
       }
       el.srcObject = stream;
@@ -1408,9 +1553,17 @@ const HTML = `<!DOCTYPE html>
         dan.fftSize = 1024;
         dan.smoothingTimeConstant = 0.05;
         const s2 = ctx.createMediaStreamSource(stream); s2.connect(dan);
-        rxSources.set(peerId, [s1, s2]);
+        const s3 = ctx.createMediaStreamSource(stream);
+        // 声は、すでに大きい（ピークが満杯に近い）ことが多く、ただ増幅しても、これ以上は大きくならない。先に、強弱をならして（圧縮）、あとから増幅し、最後に、割れないよう抑える（リミッター）
+        const ca = ctx.createDynamicsCompressor(); ca.threshold.value = -24; ca.knee.value = 10; ca.ratio.value = 8; ca.attack.value = 0.003; ca.release.value = 0.15;
+        const gn = ctx.createGain(); gn.gain.value = 0;
+        const cp = ctx.createDynamicsCompressor(); cp.threshold.value = -2; cp.knee.value = 0; cp.ratio.value = 20; cp.attack.value = 0.001; cp.release.value = 0.05;
+        s3.connect(ca); ca.connect(gn); gn.connect(cp); cp.connect(ctx.destination);
+        rxBoostNodes.set(peerId, gn);
+        rxSources.set(peerId, [s1, s2, s3]);
         rxDecoders.set(peerId, { an: dan, freq: new Uint8Array(dan.frequencyBinCount), tone: false, toneAt: 0, offAt: 0, pat: '', text: '', letterDone: false, wordDone: false });
       } catch (_) {}
+      applyPeerAudio(peerId);
       el.play().catch(function () { showUnlockHint(); }); // iPhone は操作の文脈の外では再生を弾くことがある。次のタップで鳴らし直す
     }
     window.pochiTrack = function (pc, e) {
@@ -1618,7 +1771,13 @@ const HTML = `<!DOCTYPE html>
 
       nameAction[1](function (name, peerId) {
         const p = peerMap.get(peerId);
-        if (p) { p.name = name; renderPeers(); }
+        if (p) { p.name = name; renderPeers(); guardPeerCheck(peerId); }
+      });
+      const guardIdA = actionOf(room, 'guardId');
+      sendGuardId = guardIdA[0];
+      guardIdA[1](function (uid, peerId) {
+        const p = peerMap.get(peerId);
+        if (p && typeof uid === 'string' && /^[0-9a-f]{16}$/.test(uid)) { p.uid = uid; guardPeerCheck(peerId); renderPeers(); }
       });
 
       pttStateAction[1](function (state, peerId) {
@@ -1661,6 +1820,7 @@ const HTML = `<!DOCTYPE html>
         renderPeers();
         setTimeout(checkRoomFull, 3000);
         sendNickname(shownName(), peerId);
+        if (sendGuardId) sendGuardId(myUid, peerId);
         if (sendJoinAge) sendJoinAge({ age: Date.now() - roomEnterTime }, peerId);
         if (sendTag && roomMeta.at > 0) sendTag(roomMeta, peerId); // 後から来た人にも今のタグを伝える
         // 相手が経過時間を送ってこない場合（別の実装など）: 自分が20秒以上いるなら、相手は新規とみなす
@@ -1680,7 +1840,7 @@ const HTML = `<!DOCTYPE html>
         sentStreams.delete(peerId);
         webPeers.delete(peerId); nudges.delete(peerId); nudgeSeen.delete(peerId); peerSince.delete(peerId);
         rxAnalysers.delete(peerId);
-        rxSources.delete(peerId);
+        rxSources.delete(peerId); rxBoostNodes.delete(peerId);
         rxDecoders.delete(peerId);
         faxDecoders.delete(peerId);
         cancelFaxReveal(peerId);
@@ -1797,8 +1957,10 @@ const HTML = `<!DOCTYPE html>
       }
       peerMap.forEach(function (info, id) {
         const span = document.createElement('span');
-        span.className = 'peer-tag' + (info.isTalking ? ' talking' : '');
+        span.className = 'peer-tag' + (info.isTalking ? ' talking' : '') + (guardNameBad(info.name, info.uid) ? ' ng' : '') + (info.guardMute ? ' muted-by-guard' : '') + ' clickable';
         span.textContent = info.name || id.slice(0, 5);
+        span.title = '押すと、ミュートの登録・通報';
+        span.addEventListener('click', function () { guardMenu(id); });
         peersList.appendChild(span);
       });
       if (mismatchNote) {
@@ -1817,6 +1979,46 @@ const HTML = `<!DOCTYPE html>
       renderMissing();
     }
 
+    const REPORT_FORM = 'https://docs.google.com/forms/d/e/1FAIpQLSe6jY8RmSERemjRLPO2YFQP1-sORD_6fgQKL4d6osGMuEmFTA/viewform';
+    function reportStamp() { const d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
+    function reportUrl(f) { return REPORT_FORM + '?usp=pp_url&entry.1506782741=' + encodeURIComponent(f.name) + '&entry.19877550=' + encodeURIComponent(f.uid) + '&entry.863421843=' + encodeURIComponent(f.room) + '&entry.129880049=' + encodeURIComponent(f.time); }
+    function guardMenu(peerId) {
+      const p = peerMap.get(peerId); if (!p) return;
+      const dlg = document.getElementById('guardMenuDialog');
+      const nm = String(p.name || '').replace(/^💾/, '').slice(0, 12) || '?';
+      document.getElementById('gmTitle').textContent = '「' + nm + '」';
+      document.getElementById('gmMain').style.display = ''; document.getElementById('gmReportBox').style.display = 'none';
+      const mb = document.getElementById('gmMute');
+      mb.textContent = guardIdHit(p.uid) ? 'ミュートを解除する（リストから外す）' : 'ミュートに登録する';
+      mb.onclick = function () {
+        if (!p.uid) { toast('この相手は、端末の目印を送っていないので、登録できません（古い版・ほかのアプリ）。嫌な言葉の登録を使ってください'); return; }
+        if (guardIdHit(p.uid)) delete guard.ids[p.uid]; else guard.ids[p.uid] = nm;
+        guardAfterChange(); dlg.close();
+      };
+      document.getElementById('gmReport').onclick = function () {
+        const f = { name: nm, uid: p.uid || '（不明）', room: currentKey ? fmt(currentKey) : '', time: reportStamp() };
+        const box = document.getElementById('gmReportInfo'); box.textContent = '';
+        [['相手の名前', f.name], ['端末の目印', f.uid], ['部屋のID', f.room], ['時刻', f.time]].forEach(function (r) { const d = document.createElement('div'); d.textContent = r[0] + '：' + r[1]; box.appendChild(d); });
+        document.getElementById('gmMain').style.display = 'none'; document.getElementById('gmReportBox').style.display = '';
+        const muteRow = document.getElementById('gmMuteRow'), muteAlso = document.getElementById('gmMuteAlso'), wordAlso = document.getElementById('gmWordAlso');
+        muteAlso.checked = !!p.uid && !guardIdHit(p.uid); muteRow.style.display = (!p.uid || guardIdHit(p.uid)) ? 'none' : ''; wordAlso.checked = false;
+        document.getElementById('gmReportGo').onclick = function () {
+          try { window.open(reportUrl(f), '_blank', 'noopener'); } catch (_) { location.href = reportUrl(f); }
+          if (muteAlso.checked && p.uid) guard.ids[p.uid] = nm;
+          if (wordAlso.checked && nm && guard.words.indexOf(nm) < 0 && guard.words.length < 50) guard.words.push(nm);
+          guardAfterChange(); dlg.close();
+        };
+      };
+      document.getElementById('gmReportBack').onclick = function () { document.getElementById('gmMain').style.display = ''; document.getElementById('gmReportBox').style.display = 'none'; };
+      document.getElementById('gmClose').onclick = function () { dlg.close(); };
+      openDialog(dlg);
+    }
+    function guardToggle(peerId) {
+      const p = peerMap.get(peerId); if (!p) return;
+      if (!p.uid) { toast('この相手は、端末の目印を送っていないので、登録できません（古い版・ほかのアプリ）。嫌な言葉の登録を使ってください'); return; }
+      if (guardIdHit(p.uid)) { if (window.confirm('「' + (p.name || '') + '」を、自衛リストから外しますか？')) { delete guard.ids[p.uid]; guardAfterChange(); } return; }
+      if (window.confirm('「' + (p.name || '') + '」を、自衛リストに登録しますか？\\n（この端末だけの設定です。相手には伝わりません。声は消音され、部屋の一覧で色が変わります）')) { guard.ids[p.uid] = String(p.name || '?').replace(/^💾/, '').slice(0, 12); guardAfterChange(); }
+    }
     // いま話している人（合図が「話し中」のままの人）の一覧
     function talkingIds() { const a = []; peerMap.forEach(function (p, id) { if (p.isTalking) a.push(id); }); return a; }
     // 話していた人が、話し終えた（去った）とき: ほかに、まだ話している人がいれば、受信の表示を残して、終わりの音も鳴らさない
@@ -2982,7 +3184,7 @@ const HTML = `<!DOCTYPE html>
       if (voxCheck.checked) { setVoxUI(false); stopVox(); }
       if (room) { const old = room; room = null; closeOldConnections(old); }
       releaseMic();
-      sendPttState = null; sendNickname = null; sendJoinAge = null; sendTag = null; sendFaxPage = null; sendNudge = null; sendWebcaps = null;
+      sendPttState = null; sendNickname = null; sendGuardId = null; sendJoinAge = null; sendTag = null; sendFaxPage = null; sendNudge = null; sendWebcaps = null;
       peerMap.clear(); webPeers.clear(); nudges.clear(); nudgeSeen.clear(); peerSince.clear();
       currentTalkerId = null;
       document.querySelectorAll('audio[id^="audio-"]').forEach(function (a) { a.remove(); });
@@ -3008,6 +3210,7 @@ const HTML = `<!DOCTYPE html>
       if (key !== currentKey) {
         const st0 = roomStats().get(key);
         if (st0 && st0.count >= MAX_ROOM) { toast('この部屋は満員です（' + MAX_ROOM + '人まで）'); return; }
+        if (st0 && st0.bad && !skipConfirm && !window.confirm('この部屋には、自衛リストに当たる相手（または話題タグ）があります。それでも入りますか？')) return;
       }
       if (key === currentKey) { renderFreq(key); flashSub('すでにこの周波数です'); return; }
       if (!skipConfirm) {
@@ -3183,7 +3386,7 @@ const HTML = `<!DOCTYPE html>
         return;
       }
       pres.announced = true; pres.lastSent = Date.now();
-      presenceSend({ ch: currentKey, cn: goodLinkCount(), ag: Math.floor((Date.now() - roomEnterTime) / 1000), talking: isTransmitting, name: shownName(), tag: roomMeta.tag, by: roomMeta.by, at: roomMeta.at, op: roomOpenAt });
+      presenceSend({ ch: currentKey, cn: goodLinkCount(), ag: Math.floor((Date.now() - roomEnterTime) / 1000), talking: isTransmitting, name: shownName(), tag: roomMeta.tag, by: roomMeta.by, at: roomMeta.at, op: roomOpenAt, uid: myUid });
     }
     function announceSoon() { setTimeout(announce, 300 + Math.random() * 1200); }
 
@@ -3201,7 +3404,7 @@ const HTML = `<!DOCTYPE html>
       if (!isKey(d.ch)) return;
       const isNew = !lobbyEntries.has(ev.pubkey);
       let roomWasKnown = true; try { roomWasKnown = Array.from(lobbyEntries.values()).some(function (v) { return v.ch === d.ch; }); } catch (_) {}
-      lobbyEntries.set(ev.pubkey, { ch: d.ch, ag: (typeof d.ag === 'number' && d.ag >= 0) ? d.ag : 9999, cn: (typeof d.cn === 'number' && d.cn >= 0 && d.cn < 32) ? d.cn : -1, talking: !!d.talking, name: String(d.name || '?').slice(0, 12), tag: capTag(d.tag), by: String(d.by || '').slice(0, 12), at: typeof d.at === 'number' ? d.at : 0, op: (typeof d.op === 'number' && d.op > 1.6e12 && d.op <= Date.now() + 600000) ? d.op : 0, ts: Date.now() });
+      lobbyEntries.set(ev.pubkey, { ch: d.ch, ag: (typeof d.ag === 'number' && d.ag >= 0) ? d.ag : 9999, cn: (typeof d.cn === 'number' && d.cn >= 0 && d.cn < 32) ? d.cn : -1, talking: !!d.talking, name: String(d.name || '?').slice(0, 12), tag: capTag(d.tag), by: String(d.by || '').slice(0, 12), at: typeof d.at === 'number' ? d.at : 0, op: (typeof d.op === 'number' && d.op > 1.6e12 && d.op <= Date.now() + 600000) ? d.op : 0, uid: (typeof d.uid === 'string' && /^[0-9a-f]{16}$/.test(d.uid)) ? d.uid : '', ts: Date.now() });
       if (!roomWasKnown && d.ch !== currentKey) { try { notifyNewRoom(d); } catch (_) {} }
       if (isNew && d.ch === currentKey) { try { window.pcLogAdd('一覧に現れた: ' + String(d.name || '?').slice(0, 12)); } catch (_) {} }
       if (isNew) announceSoon(); // 新しく来た人に、こちらの在室を、すぐ知らせる
@@ -3272,6 +3475,8 @@ const HTML = `<!DOCTYPE html>
         const e = stats.get(v.ch) || { count: 0, air: false, names: [], tag: '', tagBy: '', tagAt: 0, op: 0 };
         if (v.op > 0 && (!e.op || v.op < e.op)) e.op = v.op;
         e.count++; e.names.push(v.name); if (v.talking) e.air = true;
+        if (!e.nameBad) e.nameBad = [];
+        { const nb = guardNameBad(v.name, v.uid); e.nameBad.push(nb); if (nb) e.bad = true; }
         if (v.at > e.tagAt) { e.tagAt = v.at; e.tag = v.tag; e.tagBy = v.by; }
         stats.set(v.ch, e);
       });
@@ -3280,8 +3485,10 @@ const HTML = `<!DOCTYPE html>
         if (roomOpenAt > 0 && (!me.op || roomOpenAt < me.op)) me.op = roomOpenAt; else if (me.op > 0 && me.op < roomOpenAt) roomOpenAt = me.op; // いちばん早い時刻を採用
         if (roomMeta.at > me.tagAt) { me.tagAt = roomMeta.at; me.tag = roomMeta.tag; me.tagBy = roomMeta.by; }
         me.count++; me.names.unshift(shownName() + '(自分)'); if (isTransmitting) me.air = true;
+        if (me.nameBad) me.nameBad.unshift(false);
         stats.set(currentKey, me);
       }
+      stats.forEach(function (e) { if (e.tag && guardWordHit(e.tag)) e.bad = true; });
       return stats;
     }
 
@@ -3484,11 +3691,11 @@ const HTML = `<!DOCTYPE html>
     document.getElementById('inviteNew2').addEventListener('click', function () { document.getElementById('inviteLater').click(); createFromPtt(); }); // 招待を閉じて、自分で新しい部屋を作る
     document.getElementById('inviteAbout2').addEventListener('click', function () { openDialog(aboutDialog); });
 
-    function appendNames(el, names) { // 名前を1人ずつ割れない要素で並べる（改行は「、」の後だけ）
+    function appendNames(el, names, bads) { // 名前を1人ずつ割れない要素で並べる（改行は「、」の後だけ）
       names.forEach(function (nm, i) {
         if (i) el.appendChild(document.createTextNode('、'));
         const ns = document.createElement('span');
-        ns.className = 'chip-name';
+        ns.className = 'chip-name' + ((bads && bads[i]) ? ' ng' : '');
         ns.textContent = nm;
         el.appendChild(ns);
       });
@@ -3639,7 +3846,7 @@ const HTML = `<!DOCTYPE html>
       keys.forEach(function (key, i) {
         const st = stats.get(key);
         const b = document.createElement('div');
-        b.className = 'rdial-item' + (isBotRoom(key) ? ' bot' : '') + (key === currentKey ? ' me' : '') + (st.air ? ' air' : '') + (key === pendingKey ? ' invited' : '') + (st.count >= MAX_ROOM && key !== currentKey ? ' full' : '');
+        b.className = 'rdial-item' + (isBotRoom(key) ? ' bot' : '') + (key === currentKey ? ' me' : '') + (st.air ? ' air' : '') + (key === pendingKey ? ' invited' : '') + (st.count >= MAX_ROOM && key !== currentKey ? ' full' : '') + (st.bad ? ' ng' : '');
         b.setAttribute('role', 'option');
         b.dataset.key = key;
         const head = document.createElement('div');
@@ -3657,7 +3864,7 @@ const HTML = `<!DOCTYPE html>
         who.className = 'chip-who';
         if (st.invited) who.textContent = '招待された部屋（現在は無人）';
         else if (st.empty) who.textContent = 'この部屋には、いま誰もいません';
-        else appendNames(who, st.names);
+        else appendNames(who, st.names, st.nameBad);
         b.appendChild(who);
         // 赤い線に合わせた部屋をタップすると入る。ほかの部屋をタップすると、そこまで回る
         b.addEventListener('click', function () { if (FLAT || i === dialIndex()) tuneKey(key); else dialGo(i); });
@@ -3693,6 +3900,7 @@ const HTML = `<!DOCTYPE html>
       if (!f && !stats.has(BOT_ROOM_KEY)) stats.set(BOT_ROOM_KEY, { count: 0, air: false, names: [], empty: true });
       const allKeys = Array.from(stats.keys()).sort();
       let keys = f ? allKeys.filter(function (k) { return matchSearch(k, stats.get(k), f); }) : allKeys;
+      if (guard.mode === 'hide') keys = keys.filter(function (k) { const e = stats.get(k); return !(e && e.bad) || k === currentKey; }); // 自衛リストに当たる部屋は、一覧から隠す（いま入っている部屋は残す）
       // 招待された部屋は、一覧の先頭に出す
       { const top = [BOT_ROOM_KEY, BOT_ROOM_OLD].filter(function (k) { return keys.indexOf(k) >= 0; }); if (top.length) keys = top.concat(keys.filter(function (k) { return !isBotRoom(k); })); } // ボットの部屋は、いつも先頭
       if (pendingKey && keys.indexOf(pendingKey) >= 0) keys = [pendingKey].concat(keys.filter(function (k) { return k !== pendingKey; }));
@@ -3922,6 +4130,46 @@ const HTML = `<!DOCTYPE html>
     const welcomeDialog = document.getElementById('welcomeDialog');
     function openDialog(d) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
     document.getElementById('settingsBtn').addEventListener('click', function () { openDialog(settingsDialog); });
+    (function () {
+      const inp = document.getElementById('guardWordInput'); if (!inp) return;
+      function addWord() {
+        const w = inp.value.trim().slice(0, 20);
+        if (!w) return;
+        if (guard.words.indexOf(w) < 0 && guard.words.length < 50) guard.words.push(w);
+        inp.value = ''; guardAfterChange();
+      }
+      document.getElementById('guardWordAdd').addEventListener('click', addWord);
+      function addId() {
+        const idEl = document.getElementById('guardIdInput'), nmEl = document.getElementById('guardIdName');
+        const id = idEl.value.trim().toLowerCase();
+        if (!/^[0-9a-f]{16}$/.test(id)) { toast('目印は、16 文字の英数字（0-9、a-f）で入れてください'); return; }
+        if (id === myUid) { toast('これは、この端末の目印です'); return; }
+        if (!guardIdHit(id) && Object.keys(guard.ids).length >= 200) { toast('登録は、200 件までです'); return; }
+        guard.ids[id] = nmEl.value.trim().slice(0, 12) || '（手入力）';
+        idEl.value = ''; nmEl.value = ''; guardAfterChange();
+      }
+      document.getElementById('guardIdAdd').addEventListener('click', addId);
+      ['guardIdInput', 'guardIdName'].forEach(function (k) { document.getElementById(k).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addId(); } e.stopPropagation(); }); });
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addWord(); } e.stopPropagation(); });
+      document.querySelectorAll('#guardModeSeg .seg-btn').forEach(function (b) {
+        b.classList.toggle('on', b.dataset.mode === guard.mode);
+        b.addEventListener('click', function () { guard.mode = b.dataset.mode === 'hide' ? 'hide' : 'warn'; document.querySelectorAll('#guardModeSeg .seg-btn').forEach(function (x) { x.classList.toggle('on', x === b); }); guardAfterChange(); });
+      });
+      guardRenderList();
+    })();
+    (function () {
+      const bs = document.querySelectorAll('#rxBoostSeg .seg-btn');
+      bs.forEach(function (b) {
+        b.classList.toggle('on', parseFloat(b.dataset.boost) === rxBoost);
+        b.addEventListener('click', function () {
+          rxBoost = parseFloat(b.dataset.boost) || 1;
+          try { if (rxBoost > 1) localStorage.setItem('pochitalk_rx_boost', String(rxBoost)); else localStorage.removeItem('pochitalk_rx_boost'); } catch (_) {}
+          bs.forEach(function (x) { x.classList.toggle('on', x === b); });
+          try { getAudioContext(); } catch (_) {}
+          applyAllPeerAudio();
+        });
+      });
+    })();
     function closeSettings() { settingsDialog.close(); endMicTest(); if (!room) releaseMic(); }
     document.getElementById('settingsClose').addEventListener('click', closeSettings);
     settingsDialog.addEventListener('click', function (e) { if (e.target === settingsDialog) closeSettings(); });
@@ -4164,7 +4412,7 @@ const HTML = `<!DOCTYPE html>
     document.getElementById('welcomeMicBtn').addEventListener('click', function () { openDialog(settingsDialog); });
     document.getElementById('welcomeAboutBtn').addEventListener('click', function () { openDialog(aboutDialog); });
     // 利用上の注意（規約）への同意: チェックを入れないと、「はじめる」を押せない。同意した版の番号を、端末に残す（版が変わったら、もう一度出す）
-    const TERMS_VERSION = '2026-11-10';
+    const TERMS_VERSION = '2026-11-18';
     function termsOk() { try { return localStorage.getItem('pochitalk_terms') === TERMS_VERSION; } catch (_) { return false; } }
     const termsAgree = document.getElementById('termsAgree'), welcomeCloseBtn = document.getElementById('welcomeClose');
     function syncTerms() { welcomeCloseBtn.disabled = !termsAgree.checked; welcomeCloseBtn.style.opacity = termsAgree.checked ? '1' : '.45'; }
@@ -4363,7 +4611,7 @@ const HTML = `<!DOCTYPE html>
     // ---------- スピーカーミュート（相手の声と効果音を止める。マイクは止めない）----------
     const speakerBtn = document.getElementById('speakerBtn');
     function applySpeakerMute() {
-      document.querySelectorAll('audio[id^="audio-"]').forEach(function (a) { a.muted = speakerMuted; });
+      applyAllPeerAudio();
       if (sfxGainNode) sfxGainNode.gain.value = speakerMuted ? 0 : sfxVol;
       speakerBtn.textContent = speakerMuted ? '🔇' : '🔈';
       speakerBtn.setAttribute('aria-pressed', speakerMuted ? 'true' : 'false');
@@ -4877,7 +5125,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-17-z12q55（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
+const APP_VERSION = '2026-11-18-z12q65（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため

@@ -100,7 +100,7 @@ fun RadioScreen(state: UiState, rawActions: Actions, onOpenRooms: () -> Unit, mo
             join = { k ->
                 val r = state.rooms.firstOrNull { it.key == k }
                 if (k == key || (r != null && r.count >= app.pochitalk.engine.PochiEngine.MAX_ROOM && !r.isCurrent)) rawActions.join(k) // すでにいる部屋・満員は、確認の前にエンジンが知らせる
-                else confirm = Confirm.Join(k, r?.count ?: 0)
+                else confirm = Confirm.Join(k, r?.count ?: 0, r?.bad == true && state.guardMode == "warn")
             },
             create = { confirm = Confirm.New },
             leave = { confirm = Confirm.Leave },
@@ -159,7 +159,7 @@ fun RadioScreen(state: UiState, rawActions: Actions, onOpenRooms: () -> Unit, mo
         confirm?.let { c ->
             val inRoom = key != null
             val msg = when (c) {
-                is Confirm.Join -> "この部屋に入室しますか？\n" + formatKey(c.key) + (if (c.count > 0) "（いま ${c.count} 人）" else "") + (if (inRoom) "\nいまの部屋からは退出します。" else "")
+                is Confirm.Join -> (if (c.bad) "自衛リストに当たる相手（または話題タグ）があります。入りますか？\n\n" else "この部屋に入室しますか？\n") + formatKey(c.key) + (if (c.count > 0) "（いま ${c.count} 人）" else "") + (if (inRoom) "\nいまの部屋からは退出します。" else "")
                 Confirm.New -> "新しい部屋を作って、入室しますか？" + (if (inRoom) "\nいまの部屋からは退出します。" else "")
                 Confirm.Leave -> "この部屋から退出しますか？"
             }
@@ -187,7 +187,7 @@ fun RadioScreen(state: UiState, rawActions: Actions, onOpenRooms: () -> Unit, mo
 }
 
 private sealed interface Confirm {
-    data class Join(val key: String, val count: Int) : Confirm
+    data class Join(val key: String, val count: Int, val bad: Boolean = false) : Confirm
     object New : Confirm
     object Leave : Confirm
 }
@@ -307,6 +307,8 @@ private fun DeviceCard(state: UiState, key: String?, centerKey: String?, actions
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DisplayPanel(state: UiState, key: String, meter: MeterState) {
+    var guardPeer by remember { mutableStateOf<PeerInfo?>(null) }
+    guardPeer?.let { gp -> GuardMenuDialog(state, state.peers.firstOrNull { it.id == gp.id } ?: gp, key) { guardPeer = null } }
     val shape = RoundedCornerShape(16.dp)
     Column(
         Modifier
@@ -395,14 +397,16 @@ private fun DisplayPanel(state: UiState, key: String, meter: MeterState) {
                         .padding(horizontal = 8.dp, vertical = 1.dp),
                 )
                 state.peers.forEach { p ->
+                    val brown = p.bad || p.guardMute
                     Text(
-                        p.name,
-                        color = if (p.talking) Color(0xFF34D399) else PochiColors.Muted,
+                        (if (p.guardMute) "🔕 " else "") + p.name,
+                        color = if (brown) Color(0xFFD6A28A) else if (p.talking) Color(0xFF34D399) else PochiColors.Muted,
                         fontWeight = if (p.talking) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 13.sp,
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(if (p.talking) Color(0xFF064E3B) else PochiColors.Chip)
+                            .background(if (brown) Color(0xFF3B2418) else if (p.talking) Color(0xFF064E3B) else PochiColors.Chip)
+                            .clickable { guardPeer = p }
                             .padding(horizontal = 8.dp, vertical = 1.dp),
                     )
                 }

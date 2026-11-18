@@ -51,6 +51,13 @@ struct SettingsView: View {
                     Toggle("メディアボタン（イヤホンのボタンなど）で、話す・止めるを切り替える", isOn: Binding(get: { ui.mediaBtn }, set: { engine.setMediaBtn($0) }))
                     Text("メディアボタンは、押した・離したが分からないので、押すたびに「話す」「止める」を切り替えます。スペースキーは、押している間だけ話します。部屋にいる間だけ働き、部屋を出ると、ほかの音楽アプリに返します。").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("相手の声の音量") {
+                    Picker("ブースト", selection: Binding(get: { ui.rxBoost }, set: { engine.setRxBoost($0) })) {
+                        Text("そのまま").tag(1); Text("2倍").tag(2); Text("4倍").tag(4)
+                    }.pickerStyle(.segmented)
+                    Text("相手の声が小さいときに上げます。大きくすると、音が割れたり、スピーカーでハウリングしたりすることがあります。スピーカーのミュートや、自衛リストの消音は、これより優先です。").font(.footnote).foregroundStyle(.secondary)
+                }
+                GuardSettingsSection(ui: ui, engine: engine)
                 Section("新しい部屋") {
                     Toggle("新しい部屋ができたら、音で知らせる", isOn: Binding(get: { ui.notifyRoom }, set: { engine.setNotifyRoom($0) }))
                     Text("音だけで知らせます（画面の知らせや、OS の通知は出しません）。効果音がオンのときに鳴ります。オンにすると、確かめに1回鳴ります。").font(.footnote).foregroundStyle(.secondary)
