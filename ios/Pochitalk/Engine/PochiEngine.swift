@@ -24,6 +24,7 @@ final class PochiEngine: ObservableObject {
     static let maxRoom = 99 // 1つの部屋の人数の上限 (Web 版の MAX_ROOM と同じ値。実質、制限なし)
     private static let actionPttState = "pttState"
     private static let actionPttName = "pttName"
+    private static let actionGuardId = "guardId" // 端末の目印 (自衛リスト用)
     private static let actionFaxPage = "faxPage" // {c, d}: FAX の絵 (列数と、白黒のビット列の base64)
     private static let actionRoomTag = "roomTag" // {tag, by, at}。話題タグ。新しい(at が大きい)ほうが勝つ
     private static let actionJoinAge = "joinAge" // 入室してからの経過時間を交換し、新しく来た側を判定する
@@ -69,11 +70,12 @@ final class PochiEngine: ObservableObject {
     /// 自動で再接続するか (設定。標準はオフ)。オフでも、手動の「再接続」と、マイクの取り直し、音声セッションの復帰は動く。
     private var autoReconnect = false
 
-    private struct LobbyEntry { var key: String; var talking: Bool; var name: String; var ts: Int; var tag: String; var tagBy: String; var tagAt: Int; var op: Int }
+    private struct LobbyEntry { var key: String; var talking: Bool; var name: String; var ts: Int; var tag: String; var tagBy: String; var tagAt: Int; var op: Int; var uid: String }
     private var lobbyEntries: [String: LobbyEntry] = [:]
 
     private var room: TrysteroRoom?
     private var pttStateAction: TrysteroRoom.Action?
+    private var guardIdAction: TrysteroRoom.Action?
     private var pttNameAction: TrysteroRoom.Action?
     private var roomTagAction: TrysteroRoom.Action?
     private let morseRx = MorseDecoder()
@@ -82,7 +84,7 @@ final class PochiEngine: ObservableObject {
     private var lastMediaToggle = 0
     private var toneJob: Job?
     private final class PeerState {
-        var name: String; var talking: Bool; var joinJudged = false; var enteredAt = 0
+        var name: String; var talking: Bool; var joinJudged = false; var enteredAt = 0; var uid = ""; var guardNotified = false
         init(name: String, talking: Bool) { self.name = name; self.talking = talking }
     }
     private var peers: [(id: String, state: PeerState)] = []
@@ -147,6 +149,7 @@ final class PochiEngine: ObservableObject {
             st.notifyRoom = defaults.string(forKey: "pochitalk_notify_room") == "on"
             st.logRec = defaults.string(forKey: "pochitalk_log_rec") == "on"
             st.mediaBtn = defaults.object(forKey: "pochitalk_media_btn") as? Bool ?? true // 初期はオン
+            loadGuard()
             mediaButtons.onToggle = { [weak self] in self?.mediaToggle() }
             launchMs = RT.nowMs()
             if st.logRec { logBuffer = defaults.stringArray(forKey: "pochitalk_diag_log") ?? [] }
@@ -204,7 +207,7 @@ final class PochiEngine: ObservableObject {
             announce()
             renderScan()
         }
-        RT.every(3_000) { [self] in commit(); checkMismatch() } // 「接続 N / 在室 M」も3秒ごとに更新
+        RT.every(3_000) { [self] in commit(); checkMismatch(); applyRxGains() } // 「接続 N / 在室 M」も3秒ごとに更新
         RT.every(5_000) { [self] in checkRoomFull() }
         RT.every(5 * 60_000) { [self] in turn.refresh {} } // 10分以内に取れていれば何もしない
     }
@@ -378,7 +381,8 @@ final class PochiEngine: ObservableObject {
         let roomWasKnown = lobbyEntries.values.contains { $0.key == ch }
         lobbyEntries[pubkey] = LobbyEntry(
             key: ch, talking: (d["talking"] as? Bool) ?? false, name: String(((d["name"] as? String) ?? "?").prefix(12)),
-            ts: RT.nowMs(), tag: capTag(d["tag"] as? String), tagBy: String(((d["by"] as? String) ?? "").prefix(12)), tagAt: int(d["at"]), op: Self.validOp(d["op"]))
+            ts: RT.nowMs(), tag: capTag(d["tag"] as? String), tagBy: String(((d["by"] as? String) ?? "").prefix(12)), tagAt: int(d["at"]), op: Self.validOp(d["op"]),
+            uid: { let u = ((d["uid"] as? String) ?? "").lowercased(); return Guard.isUid(u) ? u : "" }())
         if !roomWasKnown { chimeNewRoom(ch) }
         if isNew {
             // 新しく来た人に、こちらの在室をすぐ知らせる (Web 版の announceSoon)
@@ -407,17 +411,18 @@ final class PochiEngine: ObservableObject {
         }
         presAnnounced = true
         presLastSent = RT.nowMs()
-        p.publish(["ch": key, "cn": room?.goodLinkCount() ?? 0, "ag": max(0, (RT.nowMs() - roomEnterTime) / 1000), "talking": isTransmitting, "name": shownName, "tag": roomMeta.tag, "by": roomMeta.by, "at": roomMeta.at, "op": roomOpenAt])
+        p.publish(["ch": key, "cn": room?.goodLinkCount() ?? 0, "ag": max(0, (RT.nowMs() - roomEnterTime) / 1000), "talking": isTransmitting, "name": shownName, "tag": roomMeta.tag, "by": roomMeta.by, "at": roomMeta.at, "op": roomOpenAt, "uid": myUid])
     }
 
     private func renderScan() {
         RT.log("scan: lobby=\(lobbyEntries.count) presence=\(presence != nil) net=\(net != nil)")
-        struct Stat { var op = 0; var count = 0; var air = false; var names: [String] = []; var tag = ""; var tagBy = ""; var tagAt = 0 }
+        struct Stat { var hit = false; var op = 0; var count = 0; var air = false; var names: [String] = []; var tag = ""; var tagBy = ""; var tagAt = 0 }
         var stats: [String: Stat] = [:]
         for e in lobbyEntries.values {
             var s = stats[e.key] ?? Stat()
             s.count += 1
             s.names.append(e.name)
+            if Guard.hit(e.name, words: guardWords) || isGuardMuted(e.uid) { s.hit = true }
             if e.op > 0 { s.op = s.op == 0 ? e.op : min(s.op, e.op) }
             if e.talking { s.air = true }
             if e.tagAt > s.tagAt { s.tagAt = e.tagAt; s.tag = e.tag; s.tagBy = e.tagBy } // 部屋のタグは、いちばん新しいものを採用する
@@ -438,16 +443,19 @@ final class PochiEngine: ObservableObject {
         if let pend, stats[pend] == nil { stats[pend] = Stat() }
         // おうむ返しの部屋は、無人でも、いつも一覧に出す (指定がなければ、ここに合わせる)
         if stats[botRoomKey] == nil { stats[botRoomKey] = Stat() }
+        for (k, v) in stats where Guard.hit(v.tag, words: guardWords) { var w = v; w.hit = true; stats[k] = w }
+        if let cur, !guardWords.isEmpty, Guard.hit(roomMeta.tag, words: guardWords) { stats[cur]?.hit = true }
         st.totalPeople = stats.values.reduce(0) { $0 + $1.count }
         // ハッシュ順。ボットの部屋は先頭、招待された部屋はさらにその前 (Web 版と同じ)
         var order = stats.keys.sorted()
         // 先頭は新しいおうむの部屋、次に旧いおうむの部屋 (人がいるときだけ。stats に載っているときだけ)
         order = [botRoomKey] + (stats[botRoomOld] != nil ? [botRoomOld] : []) + order.filter { !isBotRoom($0) }
         if let pend { order = [pend] + order.filter { $0 != pend } }
+        if st.guardMode == "hide" { order = order.filter { !(stats[$0]?.hit ?? false) || $0 == cur || isBotRoom($0) } }
         st.rooms = order.map { k in
             let s = stats[k]!
             return RoomInfo(key: k, count: s.count, air: s.air, names: s.names, invited: k == pend && s.count == 0,
-                            isCurrent: k == cur, tag: s.tag, tagBy: s.tagBy, openAt: s.count > 0 ? s.op : 0)
+                            isCurrent: k == cur, tag: s.tag, tagBy: s.tagBy, openAt: s.count > 0 ? s.op : 0, guardHit: s.hit)
         }
         st.pendingKey = pend
         commit()
@@ -505,6 +513,8 @@ final class PochiEngine: ObservableObject {
         let nameAction = r.action(Self.actionPttName)
         let joinAgeAction = r.action(Self.actionJoinAge)
         let tagAction = r.action(Self.actionRoomTag)
+        let guardAction = r.action(Self.actionGuardId)
+        guardIdAction = guardAction
         pttStateAction = stateAction; pttNameAction = nameAction; roomTagAction = tagAction
         startToneDecoding()
         // FAX: 中身はデータ便で届く (表示は、音のピーに合わせて1行ずつ)
@@ -514,6 +524,13 @@ final class PochiEngine: ObservableObject {
             if msg.isJson { faxRx.onPage(peerId: peerId, json: msg.json()) }
         }
 
+        guardAction.onMessage = { [self] msg, peerId in
+            let u = msg.text.lowercased()
+            guard Guard.isUid(u), let p = peer(peerId) else { return }
+            p.uid = u
+            noticeGuardPeer(peerId)
+            applyRxGains(); renderPeers(); renderScan()
+        }
         nameAction.onMessage = { [self] msg, peerId in
             if let p = peer(peerId) { p.name = String(msg.text.prefix(24)); renderPeers(); renderScan() }
         }
@@ -551,6 +568,9 @@ final class PochiEngine: ObservableObject {
             renderPeers()
             RT.after(3_000) { [self] in checkRoomFull() }
             nameAction.sendString(shownName, to: peerId)
+            guardAction.sendString(myUid, to: peerId)
+            RT.after(1_500) { [self] in applyRxGains() }
+            RT.after(4_000) { [self] in applyRxGains() }
             if roomMeta.at > 0 { tagAction.sendJson(metaJson(), to: peerId) } // 後から来た人にも、いまのタグを伝える
             let ageAtJoin = RT.nowMs() - roomEnterTime
             joinAgeAction.sendJson(["age": ageAtJoin], to: peerId)
@@ -580,7 +600,7 @@ final class PochiEngine: ObservableObject {
         mediaButtons.disable() // 退室したら、他の音楽アプリに返す
         room?.leave()
         room = nil
-        pttStateAction = nil; pttNameAction = nil; roomTagAction = nil; faxPageAction = nil
+        pttStateAction = nil; pttNameAction = nil; roomTagAction = nil; guardIdAction = nil; faxPageAction = nil
         faxMode = false; faxText = ""; faxProbe = ""; st.faxCompose = nil
         stopToneDecoding()
         roomMeta = ("", "", 0)
@@ -712,7 +732,7 @@ final class PochiEngine: ObservableObject {
             // 古い接続を片付ける (マイクと、部屋に入っている状態はそのまま)
             room?.leave()
             room = nil
-            pttStateAction = nil; pttNameAction = nil; roomTagAction = nil
+            pttStateAction = nil; pttNameAction = nil; roomTagAction = nil; guardIdAction = nil
             peers.removeAll()
             currentTalkerId = nil
             st.ledRx = false
@@ -899,6 +919,95 @@ final class PochiEngine: ObservableObject {
                 startTransmission(quiet: false)
                 if !isTransmitting { pressed = false }
             }
+        }
+    }
+
+    // ================================================================ 自衛リスト・受信ブースト
+
+    private var myUid = ""
+    private var guardWords: [String] = []
+    private var guardIds: [GuardId] = []
+
+    private func isGuardMuted(_ uid: String) -> Bool { !uid.isEmpty && guardIds.contains { $0.uid == uid } }
+
+    private func loadGuard() {
+        var u = (defaults.string(forKey: "pochitalk_uid") ?? "").lowercased()
+        if !Guard.isUid(u) { u = Guard.newUid(); defaults.set(u, forKey: "pochitalk_uid") }
+        myUid = u
+        guardWords = (defaults.stringArray(forKey: "pochitalk_guard_words") ?? []).map { String($0.prefix(Guard.maxWordLen)) }
+        guardIds = ((defaults.array(forKey: "pochitalk_guard_ids") as? [[String: String]]) ?? []).compactMap {
+            guard let id = $0["uid"], Guard.isUid(id) else { return nil }
+            return GuardId(uid: id, name: String(($0["name"] ?? "").prefix(24)))
+        }
+        st.guardMode = defaults.string(forKey: "pochitalk_guard_mode") == "hide" ? "hide" : "warn"
+        let b = defaults.integer(forKey: "pochitalk_rx_boost")
+        st.rxBoost = (b == 2 || b == 4) ? b : 1
+        st.myUid = myUid
+        syncGuardState()
+    }
+
+    private func syncGuardState() {
+        st.guardWords = guardWords; st.guardIds = guardIds
+    }
+
+    private func saveGuard() {
+        defaults.set(guardWords, forKey: "pochitalk_guard_words")
+        defaults.set(guardIds.map { ["uid": $0.uid, "name": $0.name] }, forKey: "pochitalk_guard_ids")
+        syncGuardState()
+        renderPeers(); renderScan(); applyRxGains()
+    }
+
+    func addGuardWord(_ w: String) {
+        RT.post { [self] in
+            let t = String(w.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Guard.maxWordLen))
+            guard !t.isEmpty, guardWords.count < Guard.maxWords, !guardWords.contains(where: { Guard.norm($0) == Guard.norm(t) }) else { return }
+            guardWords.append(t); saveGuard()
+        }
+    }
+    func removeGuardWord(_ w: String) { RT.post { [self] in guardWords.removeAll { $0 == w }; saveGuard() } }
+
+    /// uid を登録する (手入力・通報・名前タップ)。16桁の16進以外と自分の uid は弾く。
+    func addGuardId(_ uid: String, name: String) {
+        RT.post { [self] in
+            let u = uid.lowercased()
+            guard Guard.isUid(u), u != myUid else { return }
+            let n = String(name.trimmingCharacters(in: .whitespaces).prefix(24))
+            if let i = guardIds.firstIndex(where: { $0.uid == u }) { if !n.isEmpty { guardIds[i].name = n } }
+            else if guardIds.count < Guard.maxIds { guardIds.insert(GuardId(uid: u, name: n), at: 0) }
+            saveGuard()
+        }
+    }
+    func removeGuardId(_ uid: String) { RT.post { [self] in guardIds.removeAll { $0.uid == uid }; saveGuard() } }
+
+    func setGuardMode(_ m: String) {
+        RT.post { [self] in
+            st.guardMode = m == "hide" ? "hide" : "warn"
+            defaults.set(st.guardMode, forKey: "pochitalk_guard_mode")
+            renderScan(); commit()
+        }
+    }
+
+    /// 登録した相手が部屋に現れたら、注意音と知らせ (声はすでに消している)
+    private func noticeGuardPeer(_ peerId: String) {
+        guard let p = peer(peerId), isGuardMuted(p.uid), !p.guardNotified else { return }
+        p.guardNotified = true
+        sounds.playBusy()
+        flash("⚠ 自衛リストの相手が入ってきました：\(p.name)（声は消音しています）")
+    }
+
+    /// 相手ごとの受信音: 登録した相手は消音。それ以外は、設定のブースト (1/2/4倍)。
+    private func applyRxGains() {
+        guard let r = room else { return }
+        for (id, p) in peers {
+            r.setRxGain(peerId: id, mute: isGuardMuted(p.uid), volume: Double(st.rxBoost))
+        }
+    }
+
+    func setRxBoost(_ b: Int) {
+        RT.post { [self] in
+            st.rxBoost = (b == 2 || b == 4) ? b : 1
+            defaults.set(st.rxBoost, forKey: "pochitalk_rx_boost")
+            applyRxGains(); commit()
         }
     }
 
@@ -1193,6 +1302,7 @@ final class PochiEngine: ObservableObject {
         diag("受信: \(peerId.prefix(5)) talking=\(talking)")
         p?.talking = talking
         if talking {
+            applyRxGains()
             cancelRxStopWait()
             currentTalkerId = peerId
             morseRx.reset()
@@ -1304,7 +1414,8 @@ final class PochiEngine: ObservableObject {
     }
 
     private func renderPeers() {
-        st.peers = peers.map { PeerInfo(id: $0.id, name: $0.state.name, talking: $0.state.talking) }
+        st.peers = peers.map { PeerInfo(id: $0.id, name: $0.state.name, talking: $0.state.talking, uid: $0.state.uid,
+                                        muted: isGuardMuted($0.state.uid), wordHit: Guard.hit($0.state.name, words: guardWords)) }
         commit()
     }
 

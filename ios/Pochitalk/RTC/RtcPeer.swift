@@ -144,6 +144,16 @@ final class RtcPeer: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate
         // 再ネゴシエーションは peerConnectionShouldNegotiate で始まる
     }
 
+    /// 受信音声の音量。mute なら無音、そうでなければ volume 倍 (1 より大きい値も使える)。
+    func setRxGain(mute: Bool, volume: Double) {
+        guard let conn = pc, !isDead else { return }
+        for r in conn.receivers {
+            guard let t = r.track as? RTCAudioTrack else { continue }
+            t.isEnabled = !mute
+            t.source.volume = mute ? 0 : volume
+        }
+    }
+
     /// 受信中の音声の大きさ (0..1 の線形値)。取れなければ nil。
     func fetchInboundAudioLevel(_ callback: @escaping (Double?) -> Void) {
         guard let conn = pc, !isDead else { callback(nil); return }

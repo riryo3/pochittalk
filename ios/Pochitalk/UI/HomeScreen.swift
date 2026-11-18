@@ -23,7 +23,7 @@ struct WelcomeView: View {
     @State private var agreed = WelcomeView.consented()
 
     /// 同意した版 (日付)。版が変わったら、もう一度確認する。
-    static let consentVersion = "2026-11-10"
+    static let consentVersion = "2026-11-18"
     static func consented() -> Bool { UserDefaults.standard.string(forKey: "pochitalk_consent") == consentVersion }
     /// 起動時に出すか: 同意がまだ (または版が変わった) ときは必ず、そうでなければ「次回も表示する」の設定どおり。
     static func needed() -> Bool { !consented() || UserDefaults.standard.string(forKey: "pochitalk_welcome") != "off" }
@@ -41,7 +41,7 @@ struct WelcomeView: View {
                     Button { agreed.toggle() } label: {
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: agreed ? "checkmark.square.fill" : "square").font(.system(size: 22)).foregroundStyle(agreed ? Color(hex: 0x60A5FA) : PC.muted)
-                            Text("「このアプリについて」を読み、次のことを了解しました。個人が作ったα版で、動作や安全性の保証はありません。部屋は公開で、知らない人にも声が聞こえます。人数が多いと、つながりにくくなることがあります。**自己責任で使います。**")
+                            Text("「このアプリについて」を読み、次のことを了解しました。個人が作ったα版で、動作や安全性の保証はありません。部屋は公開で、知らない人にも声が聞こえます。人数が多いと、つながりにくくなることがあります。**自己責任で使います。** 嫌がらせ・わいせつ・差別・脅迫・違法な内容など、他の人を傷つける使い方はしません。困った相手は、部屋の中で名前をタップして、ミュートや通報ができます。")
                                 .font(.system(size: 13)).foregroundStyle(PC.text).multilineTextAlignment(.leading)
                         }
                     }

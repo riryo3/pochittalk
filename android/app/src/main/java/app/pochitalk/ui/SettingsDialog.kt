@@ -129,6 +129,12 @@ fun SettingsDialog(state: UiState, actions: Actions, onShowAbout: () -> Unit, on
                 Text("メディアボタンは、押した・離したが分からない端末があるので、押すたびに「話す」「止める」を切り替えます。長く押すと、押している間だけ話せる端末もあります。スペースキーは、押している間だけ話します。部屋にいる間は、ほかの音楽アプリの再生/停止ボタンを、このアプリが受け取ります。", color = PochiColors.Muted, fontSize = 11.sp)
                 Text("音だけです（画面の知らせや、通知は出しません）。効果音の音量が 0% のときは鳴りません。", color = PochiColors.Muted, fontSize = 12.sp)
 
+                SectionTitle("相手の声の音量（ブースト）")
+                RxBoostSetting(state)
+
+                SectionTitle("自衛リスト")
+                GuardSettings(state)
+
                 SectionTitle("通信の記録")
                 SwitchRow("通信の記録を、この端末に残す", state.logMode) { PochiEngine.setLogMode(it) }
                 Text("標準では、通信の記録を端末に保存しません。オンにすると、最大 300 行を、この端末だけに保存します（外部へは送りません）。オフにすると消えます。オンの間は、名前の前に 💾 が付き、同じ部屋の人にもその名前で見えます。", color = PochiColors.Muted, fontSize = 12.sp, lineHeight = 18.sp)
@@ -213,7 +219,7 @@ fun WelcomeDialog(state: UiState, onSettings: () -> Unit, onAbout: () -> Unit, o
                 Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.clickable { agreed = !agreed }) {
                     androidx.compose.material3.Checkbox(checked = agreed, onCheckedChange = { agreed = it })
                     Text(
-                        "「このアプリについて」を読み、次のことを了解しました。個人が作ったα版で、動作や安全性の保証はありません。部屋は公開で、知らない人にも声が聞こえます。人数が多いと、つながりにくくなることがあります。自己責任で使います。",
+                        "「このアプリについて」を読み、次のことを了解しました。個人が作ったα版で、動作や安全性の保証はありません。部屋は公開で、知らない人にも声が聞こえます。人数が多いと、つながりにくくなることがあります。自己責任で使います。嫌がらせ・わいせつ・差別・脅迫・違法な内容など、他の人を傷つける使い方はしません。困った相手は、部屋の中で名前をタップして、ミュートや通報ができます。",
                         color = PochiColors.Text, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 12.dp),
                     )
                 }

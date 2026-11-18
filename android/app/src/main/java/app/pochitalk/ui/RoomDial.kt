@@ -234,11 +234,13 @@ private fun DialItem(room: RoomInfo, connected: Int, pending: Boolean, onLine: B
     val edge = when {
         room.air -> PochiColors.Tx
         pending -> PochiColors.Amber
+        room.bad -> Color(0xFF9A3412)
         isBot(room.key) -> BotGreen
         else -> Color.Transparent
     }
     val bg = when {
         room.isCurrent -> Color(0xFF172554).copy(alpha = 0.55f)
+        room.bad -> Color(0xFF3B2418)
         onLine -> Color(0xFF3B82F6).copy(alpha = 0.10f)
         else -> Color.Transparent
     }
@@ -271,7 +273,7 @@ private fun DialItem(room: RoomInfo, connected: Int, pending: Boolean, onLine: B
                 room.count == 0 && room.names.isEmpty() -> "この部屋には、いま誰もいません"
                 else -> room.names.joinToString("、")
             }
-            Text(who, color = PochiColors.Muted, fontSize = 12.sp, lineHeight = 16.sp) // 全員の名前を省略せず、「、」で折り返す
+            Text(who, color = if (room.bad) Color(0xFFD6A28A) else PochiColors.Muted, fontSize = 12.sp, lineHeight = 16.sp) // 全員の名前を省略せず、「、」で折り返す
         }
     }
 }

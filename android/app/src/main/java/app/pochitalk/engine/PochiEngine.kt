@@ -3,6 +3,7 @@ package app.pochitalk.engine
 import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -64,6 +65,10 @@ object PochiEngine {
     private const val ACTION_ROOM_TAG = "roomTag" // Web版と共通: {tag, by, at}。話題タグ。新しい(at が大きい)ほうが勝つ
     private const val TAG_MAX = 30
     private const val ACTION_FAX_PAGE = "faxPage" // Web版と共通: {c: 幅, d: base64}。FAX の中身 (14行ぶん・1画素1ビット)
+    private const val ACTION_GUARD_ID = "guardId" // Web版と共通: 端末の目印 (uid, 16桁の16進) を相手に送る
+    private const val PREF_UID = "pochitalk_uid"
+    private const val PREF_GUARD = "pochitalk_guard"
+    private const val PREF_RX_BOOST = "pochitalk_rx_boost"
     private const val ACTION_JOIN_AGE = "joinAge" // Web版と共通: 入室してからの経過時間を交換し、新しく来た側を判定する
 
     /** 招待URL。Web版の公開URLに合わせて変更する。 */
@@ -84,7 +89,7 @@ object PochiEngine {
     private const val PREF_LOG_MODE = "pochitalk_log_mode"
     private const val PREF_CONSENT = "pochitalk_consent"
     /** 利用上の注意の版。内容を変えたら日付を変えると、もう一度同意を求める。 */
-    const val CONSENT_VERSION = "2026-11-10"
+    const val CONSENT_VERSION = "2026-11-18"
     private const val PREF_WELCOME = "pochitalk_welcome"       // Web版と同じ: オフにしたときだけ "off" を保存
     private const val DEFAULT_VOX_STEP = 4
     private const val STREAM_ID = "pochitalk-audio"
@@ -148,13 +153,14 @@ object PochiEngine {
         val ag: Int = 9999,
         /** 相手が見ている「部屋を開いた時刻」(エポックms)。無い/不正は0。 */
         val op: Long = 0L,
+        val uid: String = "",
     )
     private val lobbyEntries = HashMap<String, LobbyEntry>()
 
     private var room: TrysteroRoom? = null
     private var pttStateAction: TrysteroRoom.Action? = null
     private var pttNameAction: TrysteroRoom.Action? = null
-    private class PeerState(var name: String, var talking: Boolean, var joinJudged: Boolean = false, var enteredAt: Long = 0L)
+    private class PeerState(var name: String, var talking: Boolean, var joinJudged: Boolean = false, var enteredAt: Long = 0L, var uid: String = "", var guardMute: Boolean = false)
     private val peers = LinkedHashMap<String, PeerState>()
 
     /** モールスと FAX の受信 (相手の声から読む / faxPage のデータを紙に出す) */
@@ -234,6 +240,12 @@ object PochiEngine {
         micGain.gain = Math.pow(10.0, savedGain / 20.0).toFloat()
         _state.update { it.copy(micGainDb = savedGain, welcomeOn = prefs.getString(PREF_WELCOME, null) != "off", autoReconnect = prefs.getString(PREF_AUTO_RECONNECT, null) == "1") }
         _state.update { it.copy(notifyRoom = prefs.getString(PREF_NOTIFY_ROOM, null) == "1", faxAnalog = prefs.getString(PREF_FAX_ANALOG, null) == "1", mediaBtn = prefs.getString(PREF_MEDIA_BTN, null) != "0", consentOk = prefs.getString(PREF_CONSENT, null) == CONSENT_VERSION) }
+        myUid = prefs.getString(PREF_UID, null)?.takeIf { UID_RE.matches(it) } ?: run {
+            val b = ByteArray(8).also { SecureRandom().nextBytes(it) }
+            b.joinToString("") { String.format("%02x", it.toInt() and 0xff) }.also { prefs.edit().putString(PREF_UID, it).apply() }
+        }
+        loadGuard()
+        _state.update { it.copy(myUid = myUid, rxBoost = prefs.getFloat(PREF_RX_BOOST, 1f).let { v -> if (v == 2f || v == 4f) v.toInt() else 1 }) }
         if (prefs.getString(PREF_LOG_MODE, null) == "1") { _state.update { it.copy(logMode = true) }; startLogFile() }
         val savedSfx = prefs.getInt(PREF_SFX_VOL, 100).coerceIn(0, 150)
         sounds.volume = savedSfx / 100f
@@ -253,6 +265,7 @@ object PochiEngine {
             PeerConnectionFactory.InitializationOptions.builder(app).createInitializationOptions(),
         )
         val module = JavaAudioDeviceModule.builder(app)
+            .setAudioSource(android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION) // 通話用のマイク (ヘッドセットのマイクに切り替わる)
             .setSamplesReadyCallback { samples -> onMicSamples(samples) }
             .setAudioRecordStateCallback(object : JavaAudioDeviceModule.AudioRecordStateCallback {
                 override fun onWebRtcAudioRecordStart() { Runtime.scope.launch { onRtcRecording(true) } }
@@ -365,6 +378,7 @@ object PochiEngine {
             cn = d.optInt("cn", -1).let { if (it in 0..31) it else -1 },
             ag = d.optInt("ag", 9999).let { if (it >= 0) it else 9999 },
             op = d.optLong("op", 0L).let { if (it > 1_600_000_000_000L && it <= System.currentTimeMillis() + 600_000L) it else 0L },
+            uid = d.optString("uid", "").let { if (UID_RE.matches(it)) it else "" },
         )
         if (firstOfRoom) maybeNotifyNewRoom(ch)
         if (isNew) {
@@ -440,7 +454,7 @@ object PochiEngine {
                 .put("tag", roomMeta.tag).put("by", roomMeta.by).put("at", roomMeta.at)
                 .put("cn", room?.goodLinkCount() ?: 0)
                 .put("ag", ((System.currentTimeMillis() - roomEnterTime) / 1000).toInt().coerceAtLeast(0))
-                .put("op", roomOpenAt),
+                .put("op", roomOpenAt).put("uid", myUid),
         )
     }
 
@@ -452,6 +466,7 @@ object PochiEngine {
         var tagBy: String = "",
         var tagAt: Long = 0L,
         var openAt: Long = 0L,
+        val bads: MutableList<Boolean> = ArrayList(),
     )
 
     private fun renderScan() {
@@ -461,6 +476,7 @@ object PochiEngine {
             val s = stats.getOrPut(e.key) { Stat() }
             s.count++
             s.names.add(e.name)
+            s.bads.add(guardNameBad(e.name, e.uid))
             if (e.talking) s.air = true
             if (e.op > 0 && (s.openAt == 0L || e.op < s.openAt)) s.openAt = e.op
             if (e.tagAt > s.tagAt) { // 部屋のタグは、いちばん新しいものを採用する
@@ -476,6 +492,7 @@ object PochiEngine {
             if (roomOpenAt > 0 && (s.openAt == 0L || roomOpenAt < s.openAt)) s.openAt = roomOpenAt
             s.count++
             s.names.add(0, shownName() + "(自分)")
+            s.bads.add(0, false)
             if (isTransmitting) s.air = true
             if (roomMeta.at > s.tagAt) {
                 s.tagAt = roomMeta.at
@@ -487,7 +504,11 @@ object PochiEngine {
         if (pend != null && !stats.containsKey(pend)) stats[pend] = Stat()
         var total = 0
         stats.values.forEach { total += it.count }
-        val rooms = stats.keys.sorted().map { k ->
+        val g = guardState
+        val rooms = stats.keys.sorted().filter { k ->
+            val s = stats.getValue(k)
+            !(g.mode == "hide" && k != cur && (s.bads.any { it } || guardWordHit(s.tag))) // 一致した部屋は、いま入っている部屋以外、一覧から隠す
+        }.map { k ->
             val s = stats.getValue(k)
             RoomInfo(
                 key = k,
@@ -499,6 +520,8 @@ object PochiEngine {
                 tag = s.tag,
                 tagBy = s.tagBy,
                 openAt = if (s.count > 0) s.openAt else 0L,
+                nameBad = s.bads.toList(),
+                bad = s.bads.any { it } || guardWordHit(s.tag),
             )
         }
         _state.update { it.copy(rooms = rooms, totalPeople = total, pendingKey = pend) }
@@ -579,7 +602,13 @@ object PochiEngine {
         val tagAction = r.action(ACTION_ROOM_TAG)
         val faxAction = r.action(ACTION_FAX_PAGE)
         rx.clear() // 前の部屋の聞き取りをやめる
-        r.onRemoteAudio = { id, track -> rx.attach(id, track) }
+        val guardIdA = r.action(ACTION_GUARD_ID)
+        r.onRemoteAudio = { id, track -> remoteTracks[id] = track; applyPeerAudio(id); rx.attach(id, track) }
+        guardIdA.onMessage = { msg, peerId ->
+            val u = msg.text
+            val pp = peers[peerId]
+            if (pp != null && UID_RE.matches(u)) { pp.uid = u; guardPeerCheck(peerId); renderPeers() }
+        }
         faxAction.onMessage = { msg, peerId ->
             if (msg.isJson) {
                 val j = msg.json()
@@ -594,6 +623,7 @@ object PochiEngine {
         nameAction.onMessage = { msg, peerId ->
             peers[peerId]?.let {
                 it.name = msg.text.take(24)
+                guardPeerCheck(peerId)
                 renderPeers()
                 renderScan()
             }
@@ -644,6 +674,7 @@ object PochiEngine {
                 checkRoomFull()
             }
             nameAction.sendString(shownName(), peerId)
+            guardIdA.sendString(myUid, peerId)
             if (roomMeta.at > 0) tagAction.sendJson(metaJson(), peerId) // 後から来た人にも、いまのタグを伝える
             val ageAtJoin = System.currentTimeMillis() - roomEnterTime
             joinAgeAction.sendJson(JSONObject().put("age", ageAtJoin), peerId)
@@ -659,6 +690,7 @@ object PochiEngine {
         }
         r.onPeerLeave = { peerId ->
             peers.remove(peerId)
+            remoteTracks.remove(peerId)
             rx.detach(peerId)
             if (currentTalkerId == peerId) onStopReceiving()
             renderPeers()
@@ -697,6 +729,7 @@ object PochiEngine {
         roomTagAction = null
         roomMeta = Meta("", "", 0L)
         peers.clear()
+        remoteTracks.clear()
         currentTalkerId = null
         currentKey = null
         stopVoxInternal()
@@ -985,15 +1018,76 @@ object PochiEngine {
         room?.addLocalTrack(track, STREAM_ID)
     }
 
+    private var audioDeviceCallback: android.media.AudioDeviceCallback? = null
+
+    /** 有線 (4極ヘッドセット・ヘッドホン) と USB の機器。 */
+    private fun isWiredType(t: Int) = t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+        t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+        t == android.media.AudioDeviceInfo.TYPE_USB_DEVICE || t == android.media.AudioDeviceInfo.TYPE_USB_ACCESSORY
+
+    /** Bluetooth の機器 (スピーカーマイク・ヘッドセット)。通話用 (SCO / BLE) のもの。 */
+    private fun isBtType(t: Int) = t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+        (Build.VERSION.SDK_INT >= 31 && t == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET) ||
+        t == android.media.AudioDeviceInfo.TYPE_HEARING_AID
+
+    private var scoOn = false
+
+    /**
+     * 音の経路を決める。優先: 有線/USB の機器 > Bluetooth の機器 (スピーカーマイクなど) > 本体のスピーカー。
+     * 出力も、その機器のマイクでの入力も、同じ機器になる。Android 12+ は setCommunicationDevice、11以下は通話モード + SCO / setSpeakerphoneOn。
+     */
+    private fun applyAudioRoute() {
+        val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION
+        if (Build.VERSION.SDK_INT >= 31) {
+            val devs = am.availableCommunicationDevices
+            Runtime.log("audio devices: " + devs.joinToString { "${it.type}:${it.productName}" })
+            val pick = devs.firstOrNull { isWiredType(it.type) } ?: devs.firstOrNull { isBtType(it.type) }
+            if (pick != null) {
+                val ok = am.setCommunicationDevice(pick)
+                Runtime.log("audio route: ${pick.type}:${pick.productName} ok=$ok")
+            } else {
+                val spk = devs.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (spk != null) am.setCommunicationDevice(spk) else am.clearCommunicationDevice()
+                Runtime.log("audio route: speaker")
+            }
+        } else {
+            val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            val wired = outs.any { isWiredType(it.type) }
+            val bt = !wired && outs.any { isBtType(it.type) }
+            Runtime.log("audio devices: " + outs.joinToString { "${it.type}:${it.productName}" })
+            if (bt && !scoOn) { try { am.startBluetoothSco(); scoOn = true } catch (_: Throwable) {} }
+            if (!bt && scoOn) { try { am.stopBluetoothSco() } catch (_: Throwable) {}; scoOn = false }
+            @Suppress("DEPRECATION")
+            am.isBluetoothScoOn = bt
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = !wired && !bt // 外の機器があるときは、スピーカーを切る (OS が、その機器へ出す)
+            Runtime.log("audio route: ${if (wired) "wired" else if (bt) "bluetooth" else "speaker"}")
+        }
+    }
+
     private fun enterAudioSession() {
         val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
-        @Suppress("DEPRECATION")
-        am.isSpeakerphoneOn = true
+        applyAudioRoute()
+        if (audioDeviceCallback == null) {
+            val cb = object : android.media.AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>) { if (currentKey != null) applyAudioRoute() }
+                override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>) { if (currentKey != null) applyAudioRoute() }
+            }
+            audioDeviceCallback = cb
+            am.registerAudioDeviceCallback(cb, android.os.Handler(android.os.Looper.getMainLooper()))
+        }
     }
 
     private fun exitAudioSession() {
         val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioDeviceCallback?.let { am.unregisterAudioDeviceCallback(it) }
+        audioDeviceCallback = null
+        if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice()
+        if (scoOn) { try { am.stopBluetoothSco() } catch (_: Throwable) {}; scoOn = false }
+        @Suppress("DEPRECATION")
+        am.isBluetoothScoOn = false
         @Suppress("DEPRECATION")
         am.isSpeakerphoneOn = false
         am.mode = AudioManager.MODE_NORMAL
@@ -1544,7 +1638,7 @@ object PochiEngine {
     }
 
     private fun renderPeers() {
-        val list = peers.map { (id, p) -> PeerInfo(id, p.name, p.talking) }
+        val list = peers.map { (id, p) -> PeerInfo(id, p.name, p.talking, p.uid, guardNameBad(p.name, p.uid), p.guardMute) }
         _state.update { it.copy(peers = list) }
         updateCounts()
     }
@@ -1617,6 +1711,157 @@ object PochiEngine {
         micGain.gain = Math.pow(10.0, v / 20.0).toFloat()
         _state.update { it.copy(micGainDb = v) }
         prefs.edit().putInt(PREF_MIC_GAIN, v).apply()
+    }
+
+
+    // ================================================================ 自衛リスト・通報・受信ブースト (Web版 z12q56〜z12q65)
+
+    private val UID_RE = Regex("^[0-9a-f]{16}$")
+    private var myUid = ""
+    private class GuardState(var words: List<String> = emptyList(), var ids: Map<String, String> = emptyMap(), var mode: String = "warn")
+    private var guardState = GuardState()
+    private val remoteTracks = HashMap<String, AudioTrack>()
+
+    private fun loadGuard() {
+        val g = GuardState()
+        runCatching {
+            val j = JSONObject(prefs.getString(PREF_GUARD, null) ?: "{}")
+            j.optJSONArray("words")?.let { a -> g.words = (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() }.take(50) }
+            j.optJSONObject("ids")?.let { o ->
+                val m = LinkedHashMap<String, String>()
+                o.keys().asSequence().take(200).forEach { k -> if (UID_RE.matches(k)) m[k] = o.optString(k).take(12) }
+                g.ids = m
+            }
+            if (j.optString("mode") == "hide") g.mode = "hide"
+        }
+        guardState = g
+        publishGuard()
+    }
+
+    private fun publishGuard() {
+        val g = guardState
+        _state.update { it.copy(guardWords = g.words, guardIds = g.ids, guardMode = g.mode) }
+    }
+
+    private fun guardSave() {
+        val g = guardState
+        val j = JSONObject().put("words", org.json.JSONArray(g.words)).put("mode", g.mode)
+        val o = JSONObject(); g.ids.forEach { (k, v) -> o.put(k, v) }
+        prefs.edit().putString(PREF_GUARD, j.put("ids", o).toString()).apply()
+    }
+
+    /** 全角・半角、大文字・小文字、カタカナ・ひらがなの違いを、同じにみなす。 */
+    private fun guardNorm(t: String): String {
+        val n = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFKC).lowercase()
+        return buildString { n.forEach { c -> append(if (c in '\u30a1'..'\u30f6') (c.code - 0x60).toChar() else c) } }
+    }
+
+    private fun guardWordHit(text: String): Boolean {
+        val ws = guardState.words
+        if (ws.isEmpty() || text.isEmpty()) return false
+        val t = guardNorm(text)
+        return ws.any { w -> val n = guardNorm(w).trim(); n.isNotEmpty() && t.contains(n) }
+    }
+
+    private fun guardIdHit(uid: String) = uid.isNotEmpty() && guardState.ids.containsKey(uid)
+    private fun guardNameBad(name: String, uid: String): Boolean = !name.contains("(自分)") && (guardWordHit(name) || guardIdHit(uid))
+
+    /** 相手の声の大きさ: 登録した相手は 0 (消音)、ほかは受信ブースト (1/2/4)。スピーカーのミュートは別にモジュール側で効く。 */
+    private fun applyPeerAudio(peerId: String) {
+        val t = remoteTracks[peerId] ?: return
+        val off = peers[peerId]?.guardMute == true
+        runCatching {
+            t.setEnabled(!off)
+            t.setVolume(if (off) 0.0 else _state.value.rxBoost.toDouble())
+        }
+    }
+
+    private fun guardPeerCheck(peerId: String) {
+        val p = peers[peerId] ?: return
+        if (guardIdHit(p.uid) && !p.guardMute) {
+            p.guardMute = true
+            applyPeerAudio(peerId)
+            sounds.playBusy()
+            flash("⚠ 自衛リストの相手が入ってきました：" + (p.name.ifEmpty { guardState.ids[p.uid] ?: "" }) + "（声は消音しています）")
+        }
+    }
+
+    private fun guardAfterChange() {
+        guardSave()
+        publishGuard()
+        peers.forEach { (id, p) ->
+            if (guardIdHit(p.uid) && !p.guardMute) guardPeerCheck(id)
+            else if (!guardIdHit(p.uid) && p.guardMute) { p.guardMute = false; applyPeerAudio(id) }
+        }
+        renderPeers()
+        renderScan()
+    }
+
+    fun addGuardWord(word: String): Boolean {
+        val w = word.trim().take(20)
+        val g = guardState
+        if (w.isEmpty() || g.words.contains(w) || g.words.size >= 50) return false
+        g.words = g.words + w
+        guardAfterChange()
+        return true
+    }
+
+    fun removeGuardWord(word: String) {
+        guardState.words = guardState.words.filter { it != word }
+        guardAfterChange()
+    }
+
+    /** uid の手入力追加。うまくいかなければ理由を返す (成功は null)。 */
+    fun addGuardId(uid: String, name: String): String? {
+        val id = uid.trim().lowercase()
+        if (!UID_RE.matches(id)) return "目印（ID）は、16 桁の 0〜9・a〜f です"
+        if (id == myUid) return "自分の目印は、登録できません"
+        val g = guardState
+        if (!g.ids.containsKey(id) && g.ids.size >= 200) return "登録は、200 件までです"
+        g.ids = g.ids + (id to (name.trim().take(12).ifEmpty { "（手入力）" }))
+        guardAfterChange()
+        return null
+    }
+
+    fun removeGuardId(uid: String) {
+        guardState.ids = guardState.ids - uid
+        guardAfterChange()
+    }
+
+    fun setGuardMode(mode: String) {
+        guardState.mode = if (mode == "hide") "hide" else "warn"
+        guardAfterChange()
+    }
+
+    /** 部屋の中で、相手のミュート登録／解除。名前のメモは、いまの表示名。 */
+    fun toggleGuardMute(peerId: String) {
+        Runtime.scope.launch {
+            val p = peers[peerId] ?: return@launch
+            if (p.uid.isEmpty()) return@launch
+            val g = guardState
+            if (guardIdHit(p.uid)) g.ids = g.ids - p.uid
+            else if (g.ids.size < 200) g.ids = g.ids + (p.uid to p.name.replace(Regex("^💾"), "").take(12).ifEmpty { "?" })
+            guardAfterChange()
+        }
+    }
+
+    /** 通報の画面で選んだ登録を、まとめて行う。 */
+    fun guardReportRegister(peerId: String, muteAlso: Boolean, wordAlso: Boolean) {
+        Runtime.scope.launch {
+            val p = peers[peerId] ?: return@launch
+            val g = guardState
+            val nm = p.name.replace(Regex("^💾"), "").take(12)
+            if (muteAlso && p.uid.isNotEmpty() && g.ids.size < 200) g.ids = g.ids + (p.uid to nm.ifEmpty { "?" })
+            if (wordAlso && nm.isNotEmpty() && !g.words.contains(nm) && g.words.size < 50) g.words = g.words + nm
+            guardAfterChange()
+        }
+    }
+
+    fun setRxBoost(v: Int) {
+        val b = if (v == 2 || v == 4) v else 1
+        _state.update { it.copy(rxBoost = b) }
+        if (b > 1) prefs.edit().putFloat(PREF_RX_BOOST, b.toFloat()).apply() else prefs.edit().remove(PREF_RX_BOOST).apply()
+        peers.keys.toList().forEach { applyPeerAudio(it) }
     }
 
     // ---------------------------------------------------------------- 設定: 新しい部屋の音 / 通信の記録 / 同意

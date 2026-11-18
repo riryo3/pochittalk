@@ -168,6 +168,8 @@ class MainActivity : ComponentActivity() {
     private fun withPermissions(action: () -> Unit) {
         val needed = ArrayList<String>()
         if (!granted(Manifest.permission.RECORD_AUDIO)) needed.add(Manifest.permission.RECORD_AUDIO)
+        // スピーカーマイクなどの Bluetooth 機器へ、音を出し入れするために必要 (許可されなくても、有線などは使える)
+        if (Build.VERSION.SDK_INT >= 31 && !granted(Manifest.permission.BLUETOOTH_CONNECT)) needed.add(Manifest.permission.BLUETOOTH_CONNECT)
         if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
         }

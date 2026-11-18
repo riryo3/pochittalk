@@ -13,6 +13,8 @@ struct RoomInfo: Identifiable, Equatable {
     var tagBy = ""
     /// 部屋を開いた時刻 (エポック ms。0=不明・無人)
     var openAt = 0
+    /// 自衛リストに当たる (相手の名前・話題タグ・登録した相手)
+    var guardHit = false
     var id: String { key }
 }
 
@@ -20,6 +22,12 @@ struct PeerInfo: Identifiable, Equatable {
     var id: String
     var name: String
     var talking: Bool
+    /// 相手の端末の目印 (16桁の16進)。古い版の相手は空
+    var uid = ""
+    /// 登録した相手 (自動で消音)
+    var muted = false
+    /// 嫌な言葉に当たった名前
+    var wordHit = false
 }
 
 enum StatusKind { case standby, tx, rx, crosstalk }
@@ -65,6 +73,13 @@ struct UiState: Equatable {
     /// 設定のマイクテスト中 (入室していなくても入力レベルとメーターを確認できる)。
     var micTest = false
     var welcomeOn = true
+    /// 自衛リスト
+    var myUid = ""
+    var guardWords: [String] = []
+    var guardIds: [GuardId] = []
+    var guardMode = "warn" // warn=色を変える / hide=一覧から隠す
+    /// 相手の声の音量ブースト: 1 / 2 / 4
+    var rxBoost = 1
     /// 新しい部屋ができたら、音で知らせる
     var notifyRoom = false
     /// メディアボタン (イヤホンのボタンなど) で、話す・止めるを切り替える

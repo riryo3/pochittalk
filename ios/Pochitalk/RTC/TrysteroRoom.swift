@@ -157,6 +157,10 @@ final class TrysteroRoom {
     /// 音声が通っている相手の数 (自分を含まない)。在室通知の cn。
     func goodLinkCount() -> Int { slots.values.filter { $0.active && $0.peer.audioOK() }.count }
 
+    func setRxGain(peerId: String, mute: Bool, volume: Double) {
+        slots[peerId]?.peer.setRxGain(mute: mute, volume: volume)
+    }
+
     func fetchInboundAudioLevel(peerId: String, _ cb: @escaping (Double?) -> Void) {
         if let slot = slots[peerId] { slot.peer.fetchInboundAudioLevel(cb) } else { cb(nil) }
     }

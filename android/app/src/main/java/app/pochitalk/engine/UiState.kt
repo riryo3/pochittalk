@@ -13,6 +13,10 @@ data class RoomInfo(
     val tagBy: String = "",
     /** 部屋を開いた時刻 (エポックms)。不明・無人は0。 */
     val openAt: Long = 0L,
+    /** 各名前が自衛リストに当たるか (names と同じ順)。 */
+    val nameBad: List<Boolean> = emptyList(),
+    /** 自衛リストの言葉・登録した相手に当たる部屋 (話題タグも含む)。 */
+    val bad: Boolean = false,
 )
 
 /** 経過時間の表示 (Web版の fmtElapsed)。 */
@@ -26,7 +30,7 @@ fun fmtElapsed(ms: Long): String {
     }
 }
 
-data class PeerInfo(val id: String, val name: String, val talking: Boolean)
+data class PeerInfo(val id: String, val name: String, val talking: Boolean, val uid: String = "", val bad: Boolean = false, val guardMute: Boolean = false)
 
 enum class StatusKind { STANDBY, TX, RX, CROSSTALK }
 
@@ -112,6 +116,14 @@ data class UiState(
     /** つながりの順位で、自分が「入り直す番」か (Web版の linkRanking)。 */
     val rejoinTurn: Boolean = false,
     val presentCount: Int = 0,
+    /** 自衛リスト (この端末だけ): 嫌な言葉・登録した相手 (uid→メモ名)・一致した部屋の扱い ("warn" / "hide")。 */
+    val guardWords: List<String> = emptyList(),
+    val guardIds: Map<String, String> = emptyMap(),
+    val guardMode: String = "warn",
+    /** この端末の目印 (16桁の16進)。 */
+    val myUid: String = "",
+    /** 受信ブースト: 1 (そのまま) / 2 / 4。 */
+    val rxBoost: Int = 1,
 )
 
 /** UI (Activity) に頼む一回限りの操作。 */

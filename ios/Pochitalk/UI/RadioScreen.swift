@@ -11,6 +11,8 @@ struct RadioScreen: View {
     @State private var showSettings = false
     @State private var showAbout = false
     @State private var showWelcome = false
+    @State private var guardTarget: PeerInfo?
+    @State private var reportTarget: PeerInfo?
     @State private var confirm: ConfirmRequest?
     /// 初回案内は、アプリを起動したときに1回だけ出す
     private static var welcomeShown = false
@@ -69,6 +71,16 @@ struct RadioScreen: View {
             Button(c.okLabel) { c.action() }
             Button("キャンセル", role: .cancel) {}
         } message: { c in Text(c.message) }
+        .confirmationDialog(guardTarget.map { $0.name } ?? "", isPresented: Binding(get: { guardTarget != nil }, set: { if !$0 { guardTarget = nil } }), titleVisibility: .visible, presenting: guardTarget) { p in
+            if !p.uid.isEmpty {
+                Button(p.muted ? "ミュートを解除" : "ミュートに登録") {
+                    if p.muted { engine.removeGuardId(p.uid) } else { engine.addGuardId(p.uid, name: p.name) }
+                }
+            }
+            Button("この相手を通報する") { reportTarget = p }
+            Button("キャンセル", role: .cancel) {}
+        } message: { p in Text(p.uid.isEmpty ? "この相手は古い版のため、ミュートに登録できません。" : (p.muted ? "いま消音しています。" : "")) }
+        .sheet(item: $reportTarget) { p in ReportSheet(peer: p, roomKey: ui.currentKey ?? "", engine: engine) }
         .sheet(isPresented: $showAbout) { AboutView() }
         .sheet(isPresented: $showSettings) { SettingsView(ui: ui, engine: engine) }
         .sheet(isPresented: $showWelcome) { WelcomeView(ui: ui, engine: engine, onSettings: { showWelcome = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showSettings = true } }) }
@@ -322,7 +334,7 @@ struct RadioScreen: View {
         cardChrome {
             VStack(spacing: 12) {
                 header(key, wide: wide)
-                DisplayPanel(ui: ui, key: key, shown: shownRoom, meter: engine.meter)
+                DisplayPanel(ui: ui, key: key, shown: shownRoom, meter: engine.meter, onPeerTap: { guardTarget = $0 })
                 PttSection(ui: ui, idle: idleButton)
                 if key == nil { idleExtras(wide: wide) }
                 if let key, !wide { footer(key) }
@@ -403,6 +415,10 @@ struct RadioScreen: View {
         if let room, room.count >= PochiEngine.maxRoom { engine.join(key); return } // 「この部屋は満員です」を出す
         var msg = formatKey(key) + ((room?.count ?? 0) > 0 ? "（いま \(room!.count) 人）" : "")
         if ui.currentKey != nil { msg += "\nいまの部屋からは退出します。" }
+        if room?.guardHit == true && ui.guardMode == "warn" {
+            confirm = ConfirmRequest(title: "自衛リストに当たる相手（または話題タグ）があります。入りますか？", message: msg, okLabel: "入室") { closeDrawer(); engine.join(key) }
+            return
+        }
         confirm = ConfirmRequest(title: "この部屋に入室しますか？", message: msg, okLabel: "入室") { closeDrawer(); engine.join(key) }
     }
 
@@ -460,6 +476,7 @@ private struct DisplayPanel: View {
     /// 入室前に出す部屋 (招待された部屋 / ダイヤルの赤い線の部屋)
     let shown: RoomInfo?
     let meter: MeterState
+    var onPeerTap: (PeerInfo) -> Void = { _ in }
     #if os(macOS)
     private let roomHashSize: CGFloat = 26 // Mac は、部屋のアドレスを小さめに (色はそのまま)
     #else
@@ -548,7 +565,12 @@ private struct DisplayPanel: View {
             chip((ui.logRec ? "💾" : "") + myName + "（自分）", fg: ui.ledTx ? Color(hex: 0xFECACA) : Color(hex: 0xBFDBFE),
                  bg: ui.ledTx ? Color(hex: 0x7F1D1D) : Color(hex: 0x172554), bold: ui.ledTx)
             ForEach(ui.peers) { p in
-                chip(p.name, fg: p.talking ? PC.botGreen : PC.muted, bg: p.talking ? Color(hex: 0x064E3B) : PC.chip, bold: p.talking)
+                let g = p.muted || p.wordHit
+                chip((p.muted ? "🔕" : "") + p.name, fg: g ? GuardColor.fg : (p.talking ? PC.botGreen : PC.muted),
+                     bg: g ? GuardColor.bg : (p.talking ? Color(hex: 0x064E3B) : PC.chip), bold: p.talking)
+                    .onTapGesture { onPeerTap(p) }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("ミュートの登録や通報ができます")
             }
             // 一覧にはいるのに、まだ音声がつながっていない人: 赤いチップ (つながったら消える)
             ForEach(Array(ui.missingNames.enumerated()), id: \.offset) { _, n in
