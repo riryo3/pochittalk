@@ -2178,7 +2178,7 @@ const HTML = `<!DOCTYPE html>
       if (!('mediaSession' in navigator)) return;
       let silent = null;
       function silentUrl() {
-        const sr = 8000, n = sr, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+        const sr = 8000, n = sr * 10, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
         function w(o, t) { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); }
         w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
         v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
@@ -2194,6 +2194,7 @@ const HTML = `<!DOCTYPE html>
           if (!silent) { silent = new Audio(silentUrl()); silent.loop = true; silent.setAttribute('playsinline', ''); }
           try { navigator.mediaSession.metadata = new MediaMetadata({ title: 'ぽちっと通話', artist: 'ボタンで 話す / 止める' }); } catch (_) {}
           if (silent.paused) { const pr = silent.play(); if (pr && pr.catch) pr.catch(function () {}); }
+          try { navigator.mediaSession.playbackState = silent.paused ? 'paused' : 'playing'; } catch (_) {}
         } else if (silent && !silent.paused) { silent.pause(); }
       }
       setInterval(keepAlive, 2000);
@@ -5125,7 +5126,7 @@ function bytes(b64) {
 const CACHE = 'public, max-age=86400';
 
 // ---- 版の表示（画面の下、設定、ボット、/version は、すべてこの1か所から出す）。更新のたびに、ここを変える ----
-const APP_VERSION = '2026-11-18-z12q65（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
+const APP_VERSION = '2026-11-19-z12q66（Trystero 0.25.4・接続準備 0（必要になってから作る）・やり直し短縮）';
 // ---- Trystero 0.25.4（MIT License, (c) Dan Motzenbecker）を、この Worker から配信する。外部の配信元（esm.sh）の遅れや停止に左右されないため ----
 // 通話の部品 Trystero 0.25.4 の同梱版。1か所だけ書き換え: 部屋に入るときに先に作る接続の数（定数 bo）を 20 から 8 に減らした（8人の部屋の相手は最大7人）。
 // 同時に出る STUN/TURN への問い合わせを減らす試験。取り込みのURLを -p8 にしたのは、古い版が1年キャッシュされるため
